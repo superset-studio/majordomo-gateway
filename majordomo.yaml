@@ -1,0 +1,40 @@
+server:
+  host: "0.0.0.0"
+  port: 7680
+  read_timeout: 30s
+  write_timeout: 120s
+
+storage:
+  driver: postgres
+  postgres:
+    # All postgres config loaded from .env
+    max_conns: 20
+
+logging:
+  store_request_body: false
+  store_response_body: false
+  max_body_size: 65536  # Only used for postgres storage
+  body_storage: "s3"  # "none", "postgres", "s3"
+
+s3:
+  enabled: true
+  bucket: "majordomo-proxy-data"
+  region: "us-east-1"
+  endpoint: ""  # Leave empty for AWS, set for MinIO/LocalStack (e.g., "http://localhost:9000")
+  # Credentials loaded from .env
+
+pricing:
+  remote_url: "https://www.llm-prices.com/current-v1.json"
+  refresh_interval: 1h
+  fallback_file: "./pricing.json"
+  aliases_file: "./model_aliases.json"
+
+providers:
+  openai:
+    base_url: "https://api.openai.com"
+  anthropic:
+    base_url: "https://api.anthropic.com"
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com"
+  bedrock:
+    region: "us-east-1"
