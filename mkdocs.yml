@@ -1,0 +1,38 @@
+site_name: Majordomo Gateway
+site_description: A lightweight LLM API gateway for usage tracking and cost calculation
+site_url: https://majordomo-gateway.readthedocs.io
+repo_url: https://github.com/superset-studio/majordomo-gateway
+repo_name: superset-studio/majordomo-gateway
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - admonitions
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
