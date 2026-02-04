@@ -31,7 +31,7 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - tables
-  - admonitions
+  - admonition
 
 nav:
   - Home: index.md
