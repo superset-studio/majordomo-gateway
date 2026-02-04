@@ -26,7 +26,6 @@ type S3BodyStorage struct {
 
 type BodyUpload struct {
 	Key             string
-	APIKeyHash      string
 	RequestID       uuid.UUID
 	Timestamp       time.Time
 	RequestMethod   string
@@ -187,10 +186,12 @@ func (s *S3BodyStorage) Upload(upload *BodyUpload) {
 	}
 }
 
-func (s *S3BodyStorage) GenerateKey(apiKeyHash string, requestID uuid.UUID, timestamp time.Time) string {
+// GenerateKey creates an S3 key for storing request/response bodies.
+// The keyPrefix is typically the Majordomo API key ID (first 16 chars used).
+func (s *S3BodyStorage) GenerateKey(keyPrefix string, requestID uuid.UUID, timestamp time.Time) string {
 	date := timestamp.UTC().Format("2006-01-02")
-	// Use first 16 characters of API key hash as prefix
-	prefix := apiKeyHash
+	// Use first 16 characters of prefix for S3 organization
+	prefix := keyPrefix
 	if len(prefix) > 16 {
 		prefix = prefix[:16]
 	}

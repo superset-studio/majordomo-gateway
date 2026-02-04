@@ -1,15 +1,24 @@
 # Majordomo Gateway
 
+[![CI](https://github.com/superset-studio/majordomo-gateway/actions/workflows/ci.yaml/badge.svg)](https://github.com/superset-studio/majordomo-gateway/actions/workflows/ci.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/superset-studio/majordomo-gateway)](https://goreportcard.com/report/github.com/superset-studio/majordomo-gateway)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A lightweight LLM API gateway that proxies requests to upstream providers (OpenAI, Anthropic, Google Gemini), logs usage metrics, and calculates costs.
 
 ## Features
 
 - **Multi-provider support** - Route requests to OpenAI, Anthropic, and Google Gemini
+- **API key management** - Create, list, and revoke API keys with built-in CLI commands
 - **Automatic cost calculation** - Track spending with real-time pricing data from [llm-prices.com](https://llm-prices.com)
 - **Usage logging** - Store request logs in PostgreSQL with token counts, latency, and costs
 - **Custom metadata** - Attach custom headers (`X-Majordomo-*`) for tracking by user, feature, environment, etc.
 - **Body storage** - Optionally store full request/response bodies in S3 or PostgreSQL
 - **Zero-config provider detection** - Automatically detects provider from request path
+
+## Documentation
+
+- **[Getting Started Guide](docs/getting-started.md)** - Full walkthrough with SDK integration examples
 
 ## Quick Start
 
@@ -43,7 +52,15 @@ cp .env.example .env
 # Edit .env with your PostgreSQL credentials
 ```
 
-### 4. Run
+### 4. Create an API key
+
+```bash
+./bin/majordomo keys create --name "My First Key"
+```
+
+Save the returned key (it won't be shown again). Keys have the format `mdm_sk_...`.
+
+### 5. Run
 
 ```bash
 make run
@@ -51,11 +68,11 @@ make run
 
 The gateway starts on `http://localhost:7680` by default.
 
-### 5. Make a request
+### 6. Make a request
 
 ```bash
 curl -X POST http://localhost:7680/v1/chat/completions \
-  -H "X-Majordomo-Key: my-app-key" \
+  -H "X-Majordomo-Key: mdm_sk_your_key_here" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -115,7 +132,7 @@ pricing:
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `X-Majordomo-Key` | Yes | Your API key (used for tracking, any non-empty value works) |
+| `X-Majordomo-Key` | Yes | Your Majordomo API key (`mdm_sk_...`), validated against the database |
 | `X-Majordomo-Provider` | No | Force a specific provider (`openai`, `anthropic`, `gemini`) |
 | `X-Majordomo-*` | No | Custom metadata (stored with request log) |
 | `Authorization` | Yes | Upstream provider API key (`Bearer sk-...`) |
@@ -138,7 +155,7 @@ Attach metadata to requests for analytics:
 
 ```bash
 curl -X POST http://localhost:7680/v1/chat/completions \
-  -H "X-Majordomo-Key: my-key" \
+  -H "X-Majordomo-Key: mdm_sk_your_key_here" \
   -H "X-Majordomo-User-Id: user_123" \
   -H "X-Majordomo-Feature: chat" \
   -H "X-Majordomo-Environment: production" \
@@ -146,6 +163,33 @@ curl -X POST http://localhost:7680/v1/chat/completions \
 ```
 
 Metadata is stored in the `raw_metadata` JSONB column.
+
+## CLI Commands
+
+### API Key Management
+
+Create and manage API keys using the `majordomo keys` command:
+
+```bash
+# Create a new API key
+majordomo keys create --name "Production API"
+majordomo keys create --name "Dev Key" --description "For local development"
+
+# List all API keys
+majordomo keys list
+
+# Get details for a specific key
+majordomo keys get <key-id>
+
+# Update key metadata
+majordomo keys update <key-id> --name "New Name"
+majordomo keys update <key-id> --description "Updated description"
+
+# Revoke a key (permanent)
+majordomo keys revoke <key-id>
+```
+
+API keys use the format `mdm_sk_<random>`. The plaintext key is only shown once at creation time - store it securely. Keys are validated on every request and cached in memory for 5 minutes.
 
 ## Docker
 
@@ -185,19 +229,21 @@ docker run -p 7680:7680 \
 ### Request flow
 
 1. Client sends request with `X-Majordomo-Key` header
-2. Gateway detects provider from path or `X-Majordomo-Provider` header
-3. Request is forwarded to upstream provider
-4. Response is parsed for token usage
-5. Cost is calculated using current pricing data
-6. Request log is written to PostgreSQL asynchronously
-7. (Optional) Full request/response bodies stored in S3
-8. Response is returned to client
+2. Gateway validates the API key against the database (returns 401 if invalid/revoked)
+3. Gateway detects provider from path or `X-Majordomo-Provider` header
+4. Request is forwarded to upstream provider
+5. Response is parsed for token usage
+6. Cost is calculated using current pricing data
+7. Request log is written to PostgreSQL asynchronously (linked to API key)
+8. (Optional) Full request/response bodies stored in S3
+9. Response is returned to client
 
 ## Database schema
 
-The gateway uses two tables:
+The gateway uses three tables:
 
-- `llm_requests` - Request logs with token counts, costs, and metadata
+- `api_keys` - Majordomo API keys with hashes, status, and usage counts
+- `llm_requests` - Request logs with token counts, costs, and metadata (references `api_keys`)
 - `llm_requests_metadata_keys` - Tracks metadata keys for selective indexing
 
 See [schema.sql](schema.sql) for the full schema.

@@ -11,9 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
-	"github.com/superset-studio/majordomo-gateway/internal/config"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
 	"github.com/superset-studio/majordomo-gateway/internal/server"
@@ -21,9 +19,6 @@ import (
 )
 
 func main() {
-	// Load .env file if present
-	_ = godotenv.Load()
-
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
@@ -32,6 +27,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		runServe(os.Args[2:])
+	case "keys":
+		runKeys(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -42,12 +39,13 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Usage: majordomo-proxy <command> [options]
+	fmt.Println(`Usage: majordomo <command> [options]
 
 Commands:
-  serve                     Start the proxy server
+  serve    Start the proxy server
+  keys     Manage API keys
 
-Run 'majordomo-proxy serve --help' for more information.`)
+Run 'majordomo <command> --help' for more information.`)
 }
 
 func runServe(args []string) {
@@ -59,12 +57,7 @@ func runServe(args []string) {
 		Level: slog.LevelInfo,
 	})))
 
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
-	}
-
+	cfg := loadConfig(*configPath)
 	ctx := context.Background()
 
 	store, err := storage.NewPostgresStorage(ctx, cfg.Storage.Postgres.DSN(), cfg.Storage.Postgres.MaxConns, &storage.PostgresStorageConfig{
@@ -102,7 +95,7 @@ func runServe(args []string) {
 		slog.Info("S3 body storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
 	}
 
-	resolver := auth.NewResolver()
+	resolver := auth.NewResolver(store)
 
 	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, cfg)
 

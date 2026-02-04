@@ -6,9 +6,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// APIKey represents a Majordomo API key stored in the database
+type APIKey struct {
+	ID           uuid.UUID  `json:"id" db:"id"`
+	KeyHash      string     `json:"-" db:"key_hash"` // Never expose in JSON
+	Name         string     `json:"name" db:"name"`
+	Description  *string    `json:"description,omitempty" db:"description"`
+	IsActive     bool       `json:"is_active" db:"is_active"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
+	LastUsedAt   *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
+	RequestCount int64      `json:"request_count" db:"request_count"`
+}
+
+// CreateAPIKeyInput contains fields for creating a new API key
+type CreateAPIKeyInput struct {
+	Name        string
+	Description *string
+}
+
+// UpdateAPIKeyInput contains fields for updating an API key
+type UpdateAPIKeyInput struct {
+	Name        *string
+	Description *string
+}
+
+// APIKeyInfo contains resolved API key information for request processing
 type APIKeyInfo struct {
-	Hash  string
-	Alias *string
+	ID    uuid.UUID // Database ID for FK reference
+	Hash  string    // SHA256 hash of the key
+	Alias *string   // Optional alias (key name)
 }
 
 type UsageMetrics struct {
@@ -28,9 +55,14 @@ type Cost struct {
 }
 
 type RequestLog struct {
-	ID          uuid.UUID `json:"id" db:"id"`
-	APIKeyHash  string    `json:"api_key_hash" db:"api_key_hash"`
-	APIKeyAlias *string   `json:"api_key_alias,omitempty" db:"api_key_alias"`
+	ID uuid.UUID `json:"id" db:"id"`
+
+	// Majordomo API key (validated, for tracking)
+	MajordomoAPIKeyID *uuid.UUID `json:"majordomo_api_key_id,omitempty" db:"majordomo_api_key_id"`
+
+	// Provider API key (hashed Authorization header)
+	ProviderAPIKeyHash  *string `json:"provider_api_key_hash,omitempty" db:"provider_api_key_hash"`
+	ProviderAPIKeyAlias *string `json:"provider_api_key_alias,omitempty" db:"provider_api_key_alias"`
 
 	Provider      string `json:"provider" db:"provider"`
 	Model         string `json:"model" db:"model"`

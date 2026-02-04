@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/axiomhq/hyperloglog"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
 type hllKey struct {
-	APIKeyHash string
-	KeyName    string
+	MajordomoAPIKeyID uuid.UUID
+	KeyName           string
 }
 
 type hllEntry struct {
@@ -46,7 +47,7 @@ func NewHLLManager(db *sqlx.DB, flushInterval time.Duration) *HLLManager {
 // LoadFromDB loads persisted HLL states on startup.
 func (m *HLLManager) LoadFromDB(ctx context.Context) error {
 	query := `
-		SELECT api_key_hash, key_name, hll_state
+		SELECT majordomo_api_key_id, key_name, hll_state
 		FROM llm_requests_metadata_keys
 		WHERE hll_state IS NOT NULL`
 
@@ -61,22 +62,22 @@ func (m *HLLManager) LoadFromDB(ctx context.Context) error {
 
 	loaded := 0
 	for rows.Next() {
-		var apiKeyHash string
+		var apiKeyID uuid.UUID
 		var keyName string
 		var hllBytes []byte
 
-		if err := rows.Scan(&apiKeyHash, &keyName, &hllBytes); err != nil {
+		if err := rows.Scan(&apiKeyID, &keyName, &hllBytes); err != nil {
 			slog.Warn("failed to scan HLL row", "error", err)
 			continue
 		}
 
 		hll := hyperloglog.New()
 		if err := hll.UnmarshalBinary(hllBytes); err != nil {
-			slog.Warn("failed to unmarshal HLL", "error", err, "api_key_hash", apiKeyHash[:16], "key", keyName)
+			slog.Warn("failed to unmarshal HLL", "error", err, "api_key_id", apiKeyID, "key", keyName)
 			continue
 		}
 
-		key := hllKey{APIKeyHash: apiKeyHash, KeyName: keyName}
+		key := hllKey{MajordomoAPIKeyID: apiKeyID, KeyName: keyName}
 		m.hlls[key] = &hllEntry{hll: hll, dirty: false, count: 0}
 		loaded++
 	}
@@ -88,9 +89,9 @@ func (m *HLLManager) LoadFromDB(ctx context.Context) error {
 	return rows.Err()
 }
 
-// AddValue adds a value to the HLL for a given API key hash/key.
-func (m *HLLManager) AddValue(apiKeyHash, keyName, value string) {
-	key := hllKey{APIKeyHash: apiKeyHash, KeyName: keyName}
+// AddValue adds a value to the HLL for a given Majordomo API key ID/key.
+func (m *HLLManager) AddValue(apiKeyID uuid.UUID, keyName, value string) {
+	key := hllKey{MajordomoAPIKeyID: apiKeyID, KeyName: keyName}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -163,7 +164,7 @@ func (m *HLLManager) Flush(ctx context.Context) error {
 			request_count = request_count + $3,
 			last_seen_at = NOW(),
 			hll_updated_at = NOW()
-		WHERE api_key_hash = $4 AND key_name = $5`
+		WHERE majordomo_api_key_id = $4 AND key_name = $5`
 
 	flushed := 0
 	for key, entry := range toFlush {
@@ -176,15 +177,15 @@ func (m *HLLManager) Flush(ctx context.Context) error {
 
 		result, err := m.db.ExecContext(ctx, query,
 			hllBytes, cardinality, entry.count,
-			key.APIKeyHash, key.KeyName)
+			key.MajordomoAPIKeyID, key.KeyName)
 		if err != nil {
-			slog.Warn("failed to flush HLL", "error", err, "api_key_hash", key.APIKeyHash[:16], "key", key.KeyName)
+			slog.Warn("failed to flush HLL", "error", err, "api_key_id", key.MajordomoAPIKeyID, "key", key.KeyName)
 			continue
 		}
 
 		rowsAffected, _ := result.RowsAffected()
 		if rowsAffected == 0 {
-			slog.Debug("no row updated for HLL flush (key may not exist yet)", "api_key_hash", key.APIKeyHash[:16], "key", key.KeyName)
+			slog.Debug("no row updated for HLL flush (key may not exist yet)", "api_key_id", key.MajordomoAPIKeyID, "key", key.KeyName)
 		}
 		flushed++
 	}

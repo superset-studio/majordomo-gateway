@@ -27,6 +27,12 @@ type Handler struct {
 	providers map[provider.Provider]string
 }
 
+// ProviderKeyInfo contains hashed provider API key information
+type ProviderKeyInfo struct {
+	Hash  *string
+	Alias *string
+}
+
 func NewHandler(
 	storage storage.Storage,
 	s3Storage *storage.S3BodyStorage,
@@ -56,12 +62,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestedAt := time.Now()
 	requestID := uuid.New()
 
+	// Validate Majordomo API key
 	apiKey := r.Header.Get("X-Majordomo-Key")
-	apiKeyInfo, err := h.resolver.ResolveAPIKey(apiKey)
+	apiKeyInfo, err := h.resolver.ResolveAPIKey(ctx, apiKey)
 	if err != nil {
+		slog.Debug("API key validation failed", "error", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+
+	// Extract provider API key info (for tracking, not validation)
+	providerKeyInfo := extractProviderKeyInfo(r)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -108,13 +119,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	go h.logRequest(ctx, requestID, apiKeyInfo, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
 	ctx context.Context,
 	requestID uuid.UUID,
 	apiKeyInfo *models.APIKeyInfo,
+	providerKeyInfo *ProviderKeyInfo,
 	providerInfo provider.ProviderInfo,
 	req *http.Request,
 	reqBody []byte,
@@ -151,9 +163,14 @@ func (h *Handler) logRequest(
 	}
 
 	log := &models.RequestLog{
-		ID:          requestID,
-		APIKeyHash:  apiKeyInfo.Hash,
-		APIKeyAlias: apiKeyInfo.Alias,
+		ID: requestID,
+
+		// Majordomo API key (validated)
+		MajordomoAPIKeyID: &apiKeyInfo.ID,
+
+		// Provider API key (for usage tracking)
+		ProviderAPIKeyHash:  providerKeyInfo.Hash,
+		ProviderAPIKeyAlias: providerKeyInfo.Alias,
 
 		Provider:      metrics.Provider,
 		Model:         metrics.Model,
@@ -182,12 +199,11 @@ func (h *Handler) logRequest(
 	switch h.config.Logging.BodyStorage {
 	case "s3":
 		if h.s3Storage != nil {
-			s3Key := h.s3Storage.GenerateKey(apiKeyInfo.Hash, requestID, requestedAt)
+			s3Key := h.s3Storage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
 			log.BodyS3Key = &s3Key
 
 			h.s3Storage.Upload(&storage.BodyUpload{
 				Key:             s3Key,
-				APIKeyHash:      apiKeyInfo.Hash,
 				RequestID:       requestID,
 				Timestamp:       requestedAt,
 				RequestMethod:   req.Method,
@@ -213,6 +229,25 @@ func (h *Handler) logRequest(
 	h.storage.WriteRequestLog(ctx, log)
 }
 
+// extractProviderKeyInfo extracts and hashes the provider API key from the Authorization header
+func extractProviderKeyInfo(r *http.Request) *ProviderKeyInfo {
+	info := &ProviderKeyInfo{}
+
+	// Hash the Authorization header if present
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		hash := auth.HashAPIKey(authHeader)
+		info.Hash = &hash
+	}
+
+	// Get optional provider alias header
+	if alias := r.Header.Get("X-Majordomo-Provider-Alias"); alias != "" {
+		info.Alias = &alias
+	}
+
+	return info
+}
+
 func extractHeaders(h http.Header) map[string]string {
 	result := make(map[string]string)
 	for key, values := range h {
@@ -227,7 +262,8 @@ func extractHeaders(h http.Header) map[string]string {
 func extractCustomMetadata(headers map[string]string) map[string]string {
 	metadata := make(map[string]string)
 	for key, value := range headers {
-		if key != "x-majordomo-key" && key != "x-majordomo-provider" {
+		// Exclude reserved headers
+		if key != "x-majordomo-key" && key != "x-majordomo-provider" && key != "x-majordomo-provider-alias" {
 			cleanKey := strings.TrimPrefix(key, "x-majordomo-")
 			metadata[cleanKey] = value
 		}
