@@ -95,6 +95,12 @@ func TestProviderDetect(t *testing.T) {
 			wantProvider: ProviderGemini,
 		},
 		{
+			name:         "explicit gemini-openai header",
+			path:         "/v1/chat/completions",
+			headers:      map[string]string{"x-majordomo-provider": "gemini-openai"},
+			wantProvider: ProviderGeminiOpenAI,
+		},
+		{
 			name:         "chat completions path",
 			path:         "/v1/chat/completions",
 			headers:      map[string]string{},
@@ -162,8 +168,9 @@ func TestGetParser(t *testing.T) {
 		{ProviderOpenAI, "*provider.OpenAIParser"},
 		{ProviderAnthropic, "*provider.AnthropicParser"},
 		{ProviderGemini, "*provider.GeminiParser"},
-		{ProviderAzure, "*provider.OpenAIParser"},   // Azure uses OpenAI parser
-		{ProviderUnknown, "*provider.OpenAIParser"}, // Unknown defaults to OpenAI
+		{ProviderGeminiOpenAI, "*provider.OpenAIParser"}, // Gemini OpenAI-compat uses OpenAI parser
+		{ProviderAzure, "*provider.OpenAIParser"},        // Azure uses OpenAI parser
+		{ProviderUnknown, "*provider.OpenAIParser"},      // Unknown defaults to OpenAI
 	}
 
 	for _, tt := range tests {

@@ -88,11 +88,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		baseURL = providerInfo.BaseURL
 	}
 
-	resp, err := h.upstream.Forward(ctx, baseURL, r, body)
+	// Translate request if needed (e.g., OpenAI format → Anthropic format)
+	upstreamBody := body
+	if provider.IsTranslationRequired(providerInfo.Provider) {
+		translated, newPath, err := provider.TranslateOpenAIToAnthropic(body)
+		if err != nil {
+			slog.Warn("request translation failed, forwarding as-is", "error", err, "request_id", requestID)
+		} else {
+			upstreamBody = translated
+			r.URL.Path = newPath
+		}
+
+		// Convert Authorization: Bearer <key> → x-api-key: <key> for Anthropic
+		if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+			apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+			r.Header.Set("X-Api-Key", apiKey)
+			r.Header.Del("Authorization")
+			r.Header.Set("Anthropic-Version", "2023-06-01")
+		}
+	}
+
+	resp, err := h.upstream.Forward(ctx, baseURL, r, upstreamBody)
 	if err != nil {
 		slog.Error("upstream request failed", "error", err, "request_id", requestID)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
+	}
+
+	// Translate response back if needed (e.g., Anthropic format → OpenAI format)
+	if provider.IsTranslationRequired(providerInfo.Provider) && resp.StatusCode < 400 {
+		translated, err := provider.TranslateAnthropicToOpenAI(resp.Body, "")
+		if err != nil {
+			slog.Warn("response translation failed, returning as-is", "error", err, "request_id", requestID)
+		} else {
+			resp.Body = translated
+		}
 	}
 
 	respondedAt := time.Now()

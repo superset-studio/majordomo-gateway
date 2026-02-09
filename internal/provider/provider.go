@@ -10,12 +10,14 @@ import (
 type Provider string
 
 const (
-	ProviderOpenAI    Provider = "openai"
-	ProviderAnthropic Provider = "anthropic"
-	ProviderGemini    Provider = "gemini"
-	ProviderAzure     Provider = "azure"
-	ProviderBedrock   Provider = "bedrock"
-	ProviderUnknown   Provider = "unknown"
+	ProviderOpenAI       Provider = "openai"
+	ProviderAnthropic    Provider = "anthropic"
+	ProviderGemini       Provider = "gemini"
+	ProviderGeminiOpenAI    Provider = "gemini-openai"    // Gemini via OpenAI-compatible endpoint
+	ProviderAnthropicOpenAI Provider = "anthropic-openai" // Anthropic via OpenAI-compatible translation
+	ProviderAzure           Provider = "azure"
+	ProviderBedrock      Provider = "bedrock"
+	ProviderUnknown      Provider = "unknown"
 )
 
 type ResponseParser interface {
@@ -44,6 +46,12 @@ func resolveExplicitProvider(name string) ProviderInfo {
 		return ProviderInfo{Provider: ProviderAnthropic, BaseURL: "https://api.anthropic.com"}
 	case ProviderGemini:
 		return ProviderInfo{Provider: ProviderGemini, BaseURL: "https://generativelanguage.googleapis.com"}
+	case ProviderGeminiOpenAI:
+		// Gemini's OpenAI-compatible endpoint: https://ai.google.dev/gemini-api/docs/openai
+		return ProviderInfo{Provider: ProviderGeminiOpenAI, BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai"}
+	case ProviderAnthropicOpenAI:
+		// Accepts OpenAI-format requests, translates to Anthropic API format
+		return ProviderInfo{Provider: ProviderAnthropicOpenAI, BaseURL: "https://api.anthropic.com"}
 	case ProviderAzure:
 		return ProviderInfo{Provider: ProviderAzure, BaseURL: ""}
 	case ProviderBedrock:
@@ -75,7 +83,7 @@ func detectFromPath(path string) ProviderInfo {
 
 func GetParser(p Provider) ResponseParser {
 	switch p {
-	case ProviderOpenAI, ProviderAzure:
+	case ProviderOpenAI, ProviderAzure, ProviderGeminiOpenAI, ProviderAnthropicOpenAI:
 		return &OpenAIParser{}
 	case ProviderAnthropic:
 		return &AnthropicParser{}
