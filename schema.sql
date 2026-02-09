@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS llm_requests (
     input_tokens            INT NOT NULL,
     output_tokens           INT NOT NULL,
     cached_tokens           INT DEFAULT 0,
+    cache_creation_tokens   INT DEFAULT 0,
 
     input_cost              NUMERIC(12, 8) NOT NULL,
     output_cost             NUMERIC(12, 8) NOT NULL,

@@ -39,12 +39,13 @@ type APIKeyInfo struct {
 }
 
 type UsageMetrics struct {
-	Provider     string
-	Model        string
-	InputTokens  int
-	OutputTokens int
-	CachedTokens int
-	ResponseTime time.Duration
+	Provider            string
+	Model               string
+	InputTokens         int
+	OutputTokens        int
+	CachedTokens        int
+	CacheCreationTokens int
+	ResponseTime        time.Duration
 }
 
 type Cost struct {
@@ -73,9 +74,10 @@ type RequestLog struct {
 	RespondedAt    time.Time `json:"responded_at" db:"responded_at"`
 	ResponseTimeMs int64     `json:"response_time_ms" db:"response_time_ms"`
 
-	InputTokens  int `json:"input_tokens" db:"input_tokens"`
-	OutputTokens int `json:"output_tokens" db:"output_tokens"`
-	CachedTokens int `json:"cached_tokens" db:"cached_tokens"`
+	InputTokens         int `json:"input_tokens" db:"input_tokens"`
+	OutputTokens        int `json:"output_tokens" db:"output_tokens"`
+	CachedTokens        int `json:"cached_tokens" db:"cached_tokens"`
+	CacheCreationTokens int `json:"cache_creation_tokens" db:"cache_creation_tokens"`
 
 	InputCost  float64 `json:"input_cost" db:"input_cost"`
 	OutputCost float64 `json:"output_cost" db:"output_cost"`

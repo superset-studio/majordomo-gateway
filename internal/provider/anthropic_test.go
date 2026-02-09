@@ -8,13 +8,14 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 	parser := &AnthropicParser{}
 
 	tests := []struct {
-		name         string
-		responseBody []byte
-		wantInput    int
-		wantOutput   int
-		wantCached   int
-		wantModel    string
-		wantErr      bool
+		name              string
+		responseBody      []byte
+		wantInput         int
+		wantOutput        int
+		wantCached        int
+		wantCacheCreation int
+		wantModel         string
+		wantErr           bool
 	}{
 		{
 			name: "claude-3-5-sonnet standard response",
@@ -53,10 +54,53 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 					"cache_read_input_tokens": 2048
 				}
 			}`),
-			wantInput:  150,
+			wantInput:  2198, // 150 + 2048 (normalized total)
 			wantOutput: 89,
 			wantCached: 2048,
 			wantModel:  "claude-3-opus-20240229",
+		},
+		{
+			name: "cache_creation_input_tokens only",
+			responseBody: []byte(`{
+				"id": "msg_cache_create",
+				"type": "message",
+				"role": "assistant",
+				"content": [{"type": "text", "text": "Caching established."}],
+				"model": "claude-sonnet-4-20250514",
+				"stop_reason": "end_turn",
+				"usage": {
+					"input_tokens": 100,
+					"output_tokens": 50,
+					"cache_creation_input_tokens": 5000
+				}
+			}`),
+			wantInput:         5100, // 100 + 5000 (normalized total)
+			wantOutput:        50,
+			wantCached:        0,
+			wantCacheCreation: 5000,
+			wantModel:         "claude-sonnet-4-20250514",
+		},
+		{
+			name: "both cache_creation and cache_read",
+			responseBody: []byte(`{
+				"id": "msg_both_cache",
+				"type": "message",
+				"role": "assistant",
+				"content": [{"type": "text", "text": "Mixed cache scenario."}],
+				"model": "claude-sonnet-4-20250514",
+				"stop_reason": "end_turn",
+				"usage": {
+					"input_tokens": 200,
+					"output_tokens": 75,
+					"cache_read_input_tokens": 1024,
+					"cache_creation_input_tokens": 3000
+				}
+			}`),
+			wantInput:         4224, // 200 + 1024 + 3000 (normalized total)
+			wantOutput:        75,
+			wantCached:        1024,
+			wantCacheCreation: 3000,
+			wantModel:         "claude-sonnet-4-20250514",
 		},
 		{
 			name: "claude-3-haiku minimal response",
@@ -142,6 +186,9 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 			}
 			if result.CachedTokens != tt.wantCached {
 				t.Errorf("CachedTokens = %d, want %d", result.CachedTokens, tt.wantCached)
+			}
+			if result.CacheCreationTokens != tt.wantCacheCreation {
+				t.Errorf("CacheCreationTokens = %d, want %d", result.CacheCreationTokens, tt.wantCacheCreation)
 			}
 			if result.Model != tt.wantModel {
 				t.Errorf("Model = %q, want %q", result.Model, tt.wantModel)

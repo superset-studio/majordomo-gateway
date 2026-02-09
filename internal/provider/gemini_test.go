@@ -12,6 +12,7 @@ func TestGeminiParser_ParseResponse(t *testing.T) {
 		responseBody []byte
 		wantInput    int
 		wantOutput   int
+		wantCached   int
 		wantModel    string
 		wantErr      bool
 	}{
@@ -156,6 +157,31 @@ func TestGeminiParser_ParseResponse(t *testing.T) {
 			wantModel:  "gemini-1.5-pro-002",
 		},
 		{
+			name: "response with cachedContentTokenCount",
+			responseBody: []byte(`{
+				"candidates": [
+					{
+						"content": {
+							"parts": [{"text": "Using cached context."}],
+							"role": "model"
+						},
+						"finishReason": "STOP"
+					}
+				],
+				"usageMetadata": {
+					"promptTokenCount": 500,
+					"candidatesTokenCount": 30,
+					"totalTokenCount": 530,
+					"cachedContentTokenCount": 400
+				},
+				"modelVersion": "gemini-2.5-pro-preview-05-06"
+			}`),
+			wantInput:  500,
+			wantOutput: 30,
+			wantCached: 400,
+			wantModel:  "gemini-2.5-pro-preview-05-06",
+		},
+		{
 			name:         "malformed JSON",
 			responseBody: []byte(`{usageMetadata`),
 			wantErr:      true,
@@ -201,9 +227,8 @@ func TestGeminiParser_ParseResponse(t *testing.T) {
 			if result.Provider != "gemini" {
 				t.Errorf("Provider = %q, want %q", result.Provider, "gemini")
 			}
-			// Gemini doesn't support cached tokens yet
-			if result.CachedTokens != 0 {
-				t.Errorf("CachedTokens = %d, want 0", result.CachedTokens)
+			if result.CachedTokens != tt.wantCached {
+				t.Errorf("CachedTokens = %d, want %d", result.CachedTokens, tt.wantCached)
 			}
 		})
 	}

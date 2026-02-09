@@ -10,9 +10,10 @@ type GeminiParser struct{}
 
 type geminiResponse struct {
 	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		TotalTokenCount      int `json:"totalTokenCount"`
+		PromptTokenCount         int `json:"promptTokenCount"`
+		CandidatesTokenCount     int `json:"candidatesTokenCount"`
+		TotalTokenCount          int `json:"totalTokenCount"`
+		CachedContentTokenCount  int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata"`
 	ModelVersion string `json:"modelVersion"`
 }
@@ -28,7 +29,7 @@ func (p *GeminiParser) ParseResponse(body []byte) (*models.UsageMetrics, error) 
 		Model:        resp.ModelVersion,
 		InputTokens:  resp.UsageMetadata.PromptTokenCount,
 		OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
-		CachedTokens: 0,
+		CachedTokens: resp.UsageMetadata.CachedContentTokenCount,
 	}, nil
 }
 

@@ -211,9 +211,10 @@ func (h *Handler) logRequest(
 		RespondedAt:    respondedAt,
 		ResponseTimeMs: resp.ResponseTime.Milliseconds(),
 
-		InputTokens:  metrics.InputTokens,
-		OutputTokens: metrics.OutputTokens,
-		CachedTokens: metrics.CachedTokens,
+		InputTokens:         metrics.InputTokens,
+		OutputTokens:        metrics.OutputTokens,
+		CachedTokens:        metrics.CachedTokens,
+		CacheCreationTokens: metrics.CacheCreationTokens,
 
 		InputCost:  cost.InputCost,
 		OutputCost: cost.OutputCost,

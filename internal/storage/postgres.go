@@ -117,19 +117,19 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 			id, majordomo_api_key_id, provider_api_key_hash, provider_api_key_alias,
 			provider, model, request_path, request_method,
 			requested_at, responded_at, response_time_ms,
-			input_tokens, output_tokens, cached_tokens,
+			input_tokens, output_tokens, cached_tokens, cache_creation_tokens,
 			input_cost, output_cost, total_cost,
 			status_code, error_message, raw_metadata, indexed_metadata,
 			request_body, response_body, body_s3_key, model_alias_found
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
 		)`
 
 	_, err = s.db.ExecContext(ctx, query,
 		log.ID, log.MajordomoAPIKeyID, log.ProviderAPIKeyHash, log.ProviderAPIKeyAlias,
 		log.Provider, log.Model, log.RequestPath, log.RequestMethod,
 		log.RequestedAt, log.RespondedAt, log.ResponseTimeMs,
-		log.InputTokens, log.OutputTokens, log.CachedTokens,
+		log.InputTokens, log.OutputTokens, log.CachedTokens, log.CacheCreationTokens,
 		log.InputCost, log.OutputCost, log.TotalCost,
 		log.StatusCode, log.ErrorMessage, rawMetadataJSON, indexedMetadataJSON,
 		log.RequestBody, log.ResponseBody, log.BodyS3Key, log.ModelAliasFound,
