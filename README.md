@@ -191,23 +191,49 @@ majordomo keys revoke <key-id>
 
 API keys use the format `mdm_sk_<random>`. The plaintext key is only shown once at creation time - store it securely. Keys are validated on every request and cached in memory for 5 minutes.
 
-## Docker
+## Deployment
 
-### Build
+### Docker Compose (recommended)
+
+The quickest way to run the gateway with PostgreSQL:
+
+```bash
+cp .env.example .env
+# Edit .env — set MAJORDOMO_STORAGE_POSTGRES_PASSWORD at minimum
+
+make compose-up    # or: docker compose up --build -d
+```
+
+The gateway is available at `http://localhost:7680`. The database schema is applied automatically on first start.
+
+```bash
+# Verify it's running
+curl http://localhost:7680/readyz    # {"status":"ok"}
+
+# Stop everything
+make compose-down
+```
+
+### Docker (standalone)
+
+If you already have a PostgreSQL instance:
 
 ```bash
 docker build -t majordomo-gateway .
-```
 
-### Run
-
-```bash
 docker run -p 7680:7680 \
   -e MAJORDOMO_STORAGE_POSTGRES_HOST=host.docker.internal \
   -e MAJORDOMO_STORAGE_POSTGRES_USER=postgres \
   -e MAJORDOMO_STORAGE_POSTGRES_PASSWORD=secret \
   majordomo-gateway
 ```
+
+### Health endpoints
+
+| Endpoint | Purpose | Healthy | Unhealthy |
+|----------|---------|---------|-----------|
+| `GET /health` | Liveness probe | `200 ok` | — |
+| `GET /readyz` | Readiness probe (pings DB) | `200 {"status":"ok"}` | `503 {"status":"error",...}` |
 
 ## Architecture
 
@@ -251,12 +277,14 @@ See [schema.sql](schema.sql) for the full schema.
 ## Development
 
 ```bash
-make build       # Build binary
-make run         # Build and run
-make test        # Run tests
-make test-cover  # Run tests with coverage
-make lint        # Run linter
-make fmt         # Format code
+make build         # Build binary
+make run           # Build and run
+make test          # Run tests
+make test-cover    # Run tests with coverage
+make lint          # Run linter
+make fmt           # Format code
+make compose-up    # Start gateway + postgres via Docker Compose
+make compose-down  # Stop compose stack
 ```
 
 ## License

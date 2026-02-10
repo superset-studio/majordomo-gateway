@@ -36,4 +36,5 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Deployment: deployment.md
   - Pydantic AI Guide: pydantic-ai-guide.md

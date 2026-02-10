@@ -5,13 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-make build       # Build binary to bin/majordomo-proxy
-make run         # Build and run the server
-make test        # Run all tests
-make test-cover  # Run tests with coverage report
-make lint        # Run golangci-lint
-make fmt         # Format code
-make vet         # Run go vet
+make build         # Build binary to bin/majordomo-proxy
+make run           # Build and run the server
+make test          # Run all tests
+make test-cover    # Run tests with coverage report
+make lint          # Run golangci-lint
+make fmt           # Format code
+make vet           # Run go vet
+make compose-up    # Start gateway + postgres via Docker Compose
+make compose-down  # Stop compose stack
 ```
 
 Run a single test: `go test -v ./internal/pricing -run TestCalculate`
@@ -50,3 +52,20 @@ Config is loaded from `majordomo.yaml` (or `/etc/majordomo/majordomo.yaml`). Env
 ### Custom Metadata
 
 Headers prefixed with `X-Majordomo-` (except `-Key` and `-Provider`) are stored as metadata on request logs. Active keys (configured per API key) are copied to `indexed_metadata` column for GIN-indexed queries.
+
+### Health Endpoints
+
+- `GET /health` — Liveness probe. Always returns `200 ok`.
+- `GET /readyz` — Readiness probe. Pings PostgreSQL; returns `200 {"status":"ok"}` or `503 {"status":"error","error":"..."}`.
+
+## Deployment
+
+### Docker Compose
+
+The quickest way to run the gateway with a database:
+
+1. Copy `.env.example` to `.env` and set `MAJORDOMO_STORAGE_POSTGRES_PASSWORD`.
+2. Run `make compose-up` (or `docker compose up --build -d`).
+3. The gateway is available at `http://localhost:7680`.
+
+`schema.sql` is automatically applied to Postgres on first start. The gateway waits for Postgres to be healthy before starting.
