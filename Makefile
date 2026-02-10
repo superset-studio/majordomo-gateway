@@ -1,4 +1,4 @@
-.PHONY: help build run test clean lint fmt vet tidy docker-build docker-run
+.PHONY: help build run test clean lint fmt vet tidy docker-build docker-run compose-up compose-down
 
 BINARY_NAME=majordomo-proxy
 BUILD_DIR=bin
@@ -50,4 +50,10 @@ docker-build:
 	docker build -t $(BINARY_NAME) .
 
 docker-run:
-	docker run -p 8080:8080 $(BINARY_NAME)
+	docker run -p 7680:7680 $(BINARY_NAME)
+
+compose-up:
+	docker compose up --build -d
+
+compose-down:
+	docker compose down

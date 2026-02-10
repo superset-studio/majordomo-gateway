@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${MAJORDOMO_STORAGE_POSTGRES_USER:-majordomo}
+      POSTGRES_PASSWORD: ${MAJORDOMO_STORAGE_POSTGRES_PASSWORD:?Set MAJORDOMO_STORAGE_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${MAJORDOMO_STORAGE_POSTGRES_DATABASE:-majordomo}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MAJORDOMO_STORAGE_POSTGRES_USER:-majordomo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  gateway:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      MAJORDOMO_STORAGE_POSTGRES_HOST: postgres
+      MAJORDOMO_STORAGE_POSTGRES_PORT: 5432
+      MAJORDOMO_STORAGE_POSTGRES_SSLMODE: disable
+    ports:
+      - "7680:7680"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7680/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  pgdata:

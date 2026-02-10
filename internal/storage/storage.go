@@ -10,6 +10,7 @@ import (
 // Storage defines the interface for request log storage
 type Storage interface {
 	WriteRequestLog(ctx context.Context, log *models.RequestLog)
+	Ping(ctx context.Context) error
 	Close() error
 }
 

@@ -99,7 +99,7 @@ func runServe(args []string) {
 
 	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, cfg)
 
-	srv := server.New(&cfg.Server, proxyHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store)
 
 	errChan := make(chan error, 1)
 	go func() {

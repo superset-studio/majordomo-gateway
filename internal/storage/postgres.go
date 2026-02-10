@@ -166,6 +166,10 @@ func (s *PostgresStorage) registerMetadataKeys(ctx context.Context, apiKeyID uui
 	}
 }
 
+func (s *PostgresStorage) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
+}
+
 func (s *PostgresStorage) WriteRequestLog(ctx context.Context, log *models.RequestLog) {
 	select {
 	case s.logChan <- log:
