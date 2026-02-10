@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: majordomo-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: majordomo-gateway
+  template:
+    metadata:
+      labels:
+        app: majordomo-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: majordomo-gateway:latest
+          ports:
+            - containerPort: 7680
+          env:
+            - name: MAJORDOMO_STORAGE_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: majordomo-gateway-secrets
+                  key: MAJORDOMO_STORAGE_POSTGRES_PASSWORD
+            - name: MAJORDOMO_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: majordomo-gateway-secrets
+                  key: MAJORDOMO_S3_ACCESS_KEY_ID
+                  optional: true
+            - name: MAJORDOMO_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: majordomo-gateway-secrets
+                  key: MAJORDOMO_S3_SECRET_ACCESS_KEY
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/majordomo.yaml
+              subPath: majordomo.yaml
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 7680
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 7680
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: config
+          configMap:
+            name: majordomo-gateway-config

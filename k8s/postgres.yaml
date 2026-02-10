@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: majordomo-postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: majordomo-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: majordomo-postgres
+spec:
+  serviceName: majordomo-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: majordomo-postgres
+  template:
+    metadata:
+      labels:
+        app: majordomo-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: majordomo
+            - name: POSTGRES_DB
+              value: majordomo
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: majordomo-gateway-secrets
+                  key: MAJORDOMO_STORAGE_POSTGRES_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - majordomo
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - majordomo
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 512Mi
+              cpu: "1"
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
