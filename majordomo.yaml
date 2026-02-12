@@ -29,6 +29,9 @@ pricing:
   fallback_file: "./pricing.json"
   aliases_file: "./model_aliases.json"
 
+secrets:
+  encryption_key: ""  # 32-byte hex-encoded AES-256 key. Required for proxy keys. Generate with: openssl rand -hex 32
+
 providers:
   openai:
     base_url: "https://api.openai.com"

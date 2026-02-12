@@ -18,13 +18,14 @@ import (
 )
 
 type Handler struct {
-	upstream  *UpstreamClient
-	storage   storage.Storage
-	s3Storage *storage.S3BodyStorage
-	pricing   *pricing.Service
-	resolver  *auth.Resolver
-	config    *config.Config
-	providers map[provider.Provider]string
+	upstream      *UpstreamClient
+	storage       storage.Storage
+	s3Storage     *storage.S3BodyStorage
+	pricing       *pricing.Service
+	resolver      *auth.Resolver
+	proxyResolver *auth.ProxyResolver
+	config        *config.Config
+	providers     map[provider.Provider]string
 }
 
 // ProviderKeyInfo contains hashed provider API key information
@@ -38,6 +39,7 @@ func NewHandler(
 	s3Storage *storage.S3BodyStorage,
 	pricingSvc *pricing.Service,
 	resolver *auth.Resolver,
+	proxyResolver *auth.ProxyResolver,
 	cfg *config.Config,
 ) *Handler {
 	providers := map[provider.Provider]string{
@@ -47,13 +49,14 @@ func NewHandler(
 	}
 
 	return &Handler{
-		upstream:  NewUpstreamClient(),
-		storage:   storage,
-		s3Storage: s3Storage,
-		pricing:   pricingSvc,
-		resolver:  resolver,
-		config:    cfg,
-		providers: providers,
+		upstream:      NewUpstreamClient(),
+		storage:       storage,
+		s3Storage:     s3Storage,
+		pricing:       pricingSvc,
+		resolver:      resolver,
+		proxyResolver: proxyResolver,
+		config:        cfg,
+		providers:     providers,
 	}
 }
 
@@ -82,6 +85,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	headers := extractHeaders(r.Header)
 	providerInfo := provider.Detect(r.URL.Path, headers)
+
+	// Check if Authorization header contains a proxy key
+	var proxyKeyID *uuid.UUID
+	if h.proxyResolver != nil {
+		authHeader := r.Header.Get("Authorization")
+		authKey := strings.TrimPrefix(authHeader, "Bearer ")
+		providerKey, pkID, proxyErr := h.proxyResolver.ResolveProxyKey(ctx, authKey, string(providerInfo.Provider), apiKeyInfo.ID)
+		if proxyErr != nil {
+			slog.Debug("proxy key validation failed", "error", proxyErr)
+			http.Error(w, proxyErr.Error(), http.StatusUnauthorized)
+			return
+		}
+		if providerKey != "" {
+			r.Header.Set("Authorization", "Bearer "+providerKey)
+			proxyKeyID = pkID
+		}
+	}
 
 	baseURL := h.providers[providerInfo.Provider]
 	if baseURL == "" {
@@ -149,7 +169,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
@@ -157,6 +177,7 @@ func (h *Handler) logRequest(
 	requestID uuid.UUID,
 	apiKeyInfo *models.APIKeyInfo,
 	providerKeyInfo *ProviderKeyInfo,
+	proxyKeyID *uuid.UUID,
 	providerInfo provider.ProviderInfo,
 	req *http.Request,
 	reqBody []byte,
@@ -197,6 +218,9 @@ func (h *Handler) logRequest(
 
 		// Majordomo API key (validated)
 		MajordomoAPIKeyID: &apiKeyInfo.ID,
+
+		// Proxy key (if request used one)
+		ProxyKeyID: proxyKeyID,
 
 		// Provider API key (for usage tracking)
 		ProviderAPIKeyHash:  providerKeyInfo.Hash,

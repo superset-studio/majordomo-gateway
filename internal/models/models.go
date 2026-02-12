@@ -55,11 +55,44 @@ type Cost struct {
 	ModelAliasFound bool
 }
 
+// ProxyKey represents a customer-facing proxy key that maps to real provider keys
+type ProxyKey struct {
+	ID                uuid.UUID  `json:"id" db:"id"`
+	KeyHash           string     `json:"-" db:"key_hash"`
+	Name              string     `json:"name" db:"name"`
+	Description       *string    `json:"description,omitempty" db:"description"`
+	MajordomoAPIKeyID uuid.UUID  `json:"majordomo_api_key_id" db:"majordomo_api_key_id"`
+	IsActive          bool       `json:"is_active" db:"is_active"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	RevokedAt         *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
+	LastUsedAt        *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
+	RequestCount      int64      `json:"request_count" db:"request_count"`
+}
+
+// CreateProxyKeyInput contains fields for creating a new proxy key
+type CreateProxyKeyInput struct {
+	Name        string
+	Description *string
+}
+
+// ProviderMapping maps a proxy key to an encrypted provider API key for a specific provider
+type ProviderMapping struct {
+	ID           uuid.UUID `json:"id" db:"id"`
+	ProxyKeyID   uuid.UUID `json:"proxy_key_id" db:"proxy_key_id"`
+	Provider     string    `json:"provider" db:"provider"`
+	EncryptedKey string    `json:"-" db:"encrypted_key"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
 type RequestLog struct {
 	ID uuid.UUID `json:"id" db:"id"`
 
 	// Majordomo API key (validated, for tracking)
 	MajordomoAPIKeyID *uuid.UUID `json:"majordomo_api_key_id,omitempty" db:"majordomo_api_key_id"`
+
+	// Proxy key (if request used a proxy key)
+	ProxyKeyID *uuid.UUID `json:"proxy_key_id,omitempty" db:"proxy_key_id"`
 
 	// Provider API key (hashed Authorization header)
 	ProviderAPIKeyHash  *string `json:"provider_api_key_hash,omitempty" db:"provider_api_key_hash"`

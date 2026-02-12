@@ -114,7 +114,7 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 
 	query := `
 		INSERT INTO llm_requests (
-			id, majordomo_api_key_id, provider_api_key_hash, provider_api_key_alias,
+			id, majordomo_api_key_id, proxy_key_id, provider_api_key_hash, provider_api_key_alias,
 			provider, model, request_path, request_method,
 			requested_at, responded_at, response_time_ms,
 			input_tokens, output_tokens, cached_tokens, cache_creation_tokens,
@@ -122,11 +122,11 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 			status_code, error_message, raw_metadata, indexed_metadata,
 			request_body, response_body, body_s3_key, model_alias_found
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
 		)`
 
 	_, err = s.db.ExecContext(ctx, query,
-		log.ID, log.MajordomoAPIKeyID, log.ProviderAPIKeyHash, log.ProviderAPIKeyAlias,
+		log.ID, log.MajordomoAPIKeyID, log.ProxyKeyID, log.ProviderAPIKeyHash, log.ProviderAPIKeyAlias,
 		log.Provider, log.Model, log.RequestPath, log.RequestMethod,
 		log.RequestedAt, log.RespondedAt, log.ResponseTimeMs,
 		log.InputTokens, log.OutputTokens, log.CachedTokens, log.CacheCreationTokens,

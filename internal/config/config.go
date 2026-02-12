@@ -16,6 +16,11 @@ type Config struct {
 	Providers ProvidersConfig `mapstructure:"providers"`
 	S3        S3Config        `mapstructure:"s3"`
 	Metadata  MetadataConfig  `mapstructure:"metadata"`
+	Secrets   SecretsConfig   `mapstructure:"secrets"`
+}
+
+type SecretsConfig struct {
+	EncryptionKey string `mapstructure:"encryption_key"` // AES-256 key, hex-encoded (64 chars)
 }
 
 type MetadataConfig struct {
@@ -160,4 +165,6 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("metadata.hll_flush_interval", 60*time.Second)
 	v.SetDefault("metadata.active_keys_cache_ttl", 5*time.Minute)
+
+	v.SetDefault("secrets.encryption_key", "")
 }

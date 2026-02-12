@@ -11,9 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/superset-studio/majordomo-gateway/internal/api"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
+	"github.com/superset-studio/majordomo-gateway/internal/secrets"
 	"github.com/superset-studio/majordomo-gateway/internal/server"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
@@ -29,6 +31,8 @@ func main() {
 		runServe(os.Args[2:])
 	case "keys":
 		runKeys(os.Args[2:])
+	case "proxy-keys":
+		runProxyKeys(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -42,8 +46,9 @@ func printUsage() {
 	fmt.Println(`Usage: majordomo <command> [options]
 
 Commands:
-  serve    Start the proxy server
-  keys     Manage API keys
+  serve        Start the proxy server
+  keys         Manage API keys
+  proxy-keys   Manage proxy keys
 
 Run 'majordomo <command> --help' for more information.`)
 }
@@ -97,9 +102,23 @@ func runServe(args []string) {
 
 	resolver := auth.NewResolver(store)
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, cfg)
+	// Set up proxy key support if encryption key is configured
+	var proxyResolver *auth.ProxyResolver
+	var apiHandler *api.Handler
+	if cfg.Secrets.EncryptionKey != "" {
+		secretStore, err := secrets.NewAESStore(cfg.Secrets.EncryptionKey)
+		if err != nil {
+			slog.Error("failed to initialize secret store", "error", err)
+			os.Exit(1)
+		}
+		proxyResolver = auth.NewProxyResolver(store, secretStore)
+		apiHandler = api.NewHandler(store, secretStore)
+		slog.Info("proxy key support enabled")
+	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store)
+	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, cfg)
+
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver)
 
 	errChan := make(chan error, 1)
 	go func() {

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/superset-studio/majordomo-gateway/internal/api"
+	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
 )
@@ -24,7 +26,7 @@ type Server struct {
 	healthChecker HealthChecker
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -38,6 +40,20 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 
 	router.Get("/health", healthHandler)
 	router.Get("/readyz", s.readyzHandler)
+
+	if apiHandler != nil {
+		router.Route("/api/v1", func(r chi.Router) {
+			r.Use(api.AuthMiddleware(resolver))
+			r.Post("/proxy-keys", apiHandler.CreateProxyKey)
+			r.Get("/proxy-keys", apiHandler.ListProxyKeys)
+			r.Get("/proxy-keys/{id}", apiHandler.GetProxyKey)
+			r.Delete("/proxy-keys/{id}", apiHandler.RevokeProxyKey)
+			r.Put("/proxy-keys/{id}/providers/{provider}", apiHandler.SetProviderMapping)
+			r.Delete("/proxy-keys/{id}/providers/{provider}", apiHandler.DeleteProviderMapping)
+			r.Get("/proxy-keys/{id}/providers", apiHandler.ListProviderMappings)
+		})
+	}
+
 	router.Handle("/*", proxyHandler)
 
 	s.httpServer = &http.Server{

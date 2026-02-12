@@ -88,3 +88,34 @@ CREATE TABLE IF NOT EXISTS llm_requests_metadata_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_requests_metadata_keys_active ON llm_requests_metadata_keys(majordomo_api_key_id) WHERE is_active = true;
+
+-- Proxy Keys
+CREATE TABLE IF NOT EXISTS proxy_keys (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key_hash                VARCHAR(64) NOT NULL UNIQUE,
+    name                    VARCHAR(255) NOT NULL,
+    description             TEXT,
+    majordomo_api_key_id    UUID NOT NULL REFERENCES api_keys(id),
+    is_active               BOOLEAN NOT NULL DEFAULT true,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at              TIMESTAMPTZ,
+    last_used_at            TIMESTAMPTZ,
+    request_count           BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_keys_hash ON proxy_keys(key_hash) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_proxy_keys_majordomo_key ON proxy_keys(majordomo_api_key_id);
+
+-- Proxy Key Provider Mappings
+CREATE TABLE IF NOT EXISTS proxy_key_provider_mappings (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proxy_key_id    UUID NOT NULL REFERENCES proxy_keys(id) ON DELETE CASCADE,
+    provider        VARCHAR(100) NOT NULL,
+    encrypted_key   TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(proxy_key_id, provider)
+);
+
+-- Add proxy_key_id to llm_requests
+ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS proxy_key_id UUID REFERENCES proxy_keys(id);
