@@ -36,6 +36,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Proxy Keys: proxy-keys.md
   - Deployment:
     - Overview: deployment.md
     - Docker Compose: deployment/docker-compose.md
