@@ -7,21 +7,27 @@ server:
 storage:
   driver: postgres
   postgres:
-    # All postgres config loaded from .env
+    host: localhost
+    port: 5432
+    user: ""        # Or set MAJORDOMO_STORAGE_POSTGRES_USER
+    password: ""    # Or set MAJORDOMO_STORAGE_POSTGRES_PASSWORD
+    database: majordomo
+    sslmode: disable
     max_conns: 20
 
 logging:
   store_request_body: false
   store_response_body: false
   max_body_size: 65536  # Only used for postgres storage
-  body_storage: "s3"  # "none", "postgres", "s3"
+  body_storage: "none"  # "none", "postgres", "s3"
 
 s3:
-  enabled: true
-  bucket: "majordomo-proxy-data"
+  enabled: false
+  bucket: ""
   region: "us-east-1"
   endpoint: ""  # Leave empty for AWS, set for MinIO/LocalStack (e.g., "http://localhost:9000")
-  # Credentials loaded from .env
+  access_key_id: ""      # Or set MAJORDOMO_S3_ACCESS_KEY_ID
+  secret_access_key: ""  # Or set MAJORDOMO_S3_SECRET_ACCESS_KEY
 
 pricing:
   remote_url: "https://www.llm-prices.com/current-v1.json"
@@ -41,3 +47,11 @@ providers:
     base_url: "https://generativelanguage.googleapis.com"
   bedrock:
     region: "us-east-1"
+
+# Web UI (optional) — set jwt.secret to enable admin API endpoints
+jwt:
+  secret: ""      # Required to enable web UI. Use a random string (>= 32 chars): openssl rand -base64 32
+  expiry: 24h
+
+cors:
+  allowed_origins: []  # e.g., ["http://localhost:6785"] for Vite dev server

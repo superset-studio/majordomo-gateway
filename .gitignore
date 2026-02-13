@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# Config file (contains secrets)
+majordomo.yaml
+
 # Editor/IDE
 .idea/
 # .vscode/

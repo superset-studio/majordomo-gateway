@@ -23,6 +23,16 @@ type APIKeyStorage interface {
 	UpdateAPIKey(ctx context.Context, id uuid.UUID, input *models.UpdateAPIKeyInput) (*models.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
+	ListAPIKeysByUserID(ctx context.Context, userID uuid.UUID) ([]*models.APIKey, error)
+}
+
+// UserStorage defines the interface for user CRUD operations
+type UserStorage interface {
+	CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
+	ListUsers(ctx context.Context) ([]*models.User, error)
+	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 }
 
 // ProxyKeyStorage defines the interface for proxy key CRUD operations

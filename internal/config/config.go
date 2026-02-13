@@ -17,6 +17,17 @@ type Config struct {
 	S3        S3Config        `mapstructure:"s3"`
 	Metadata  MetadataConfig  `mapstructure:"metadata"`
 	Secrets   SecretsConfig   `mapstructure:"secrets"`
+	JWT       JWTConfig       `mapstructure:"jwt"`
+	CORS      CORSConfig      `mapstructure:"cors"`
+}
+
+type JWTConfig struct {
+	Secret string        `mapstructure:"secret"`
+	Expiry time.Duration `mapstructure:"expiry"`
+}
+
+type CORSConfig struct {
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 type SecretsConfig struct {
@@ -167,4 +178,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("metadata.active_keys_cache_ttl", 5*time.Minute)
 
 	v.SetDefault("secrets.encryption_key", "")
+
+	v.SetDefault("jwt.secret", "")
+	v.SetDefault("jwt.expiry", 24*time.Hour)
+
+	v.SetDefault("cors.allowed_origins", []string{})
 }

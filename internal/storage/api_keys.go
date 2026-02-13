@@ -18,12 +18,12 @@ var (
 // CreateAPIKey creates a new API key in the database
 func (s *PostgresStorage) CreateAPIKey(ctx context.Context, keyHash string, input *models.CreateAPIKeyInput) (*models.APIKey, error) {
 	query := `
-		INSERT INTO api_keys (key_hash, name, description)
-		VALUES ($1, $2, $3)
-		RETURNING id, key_hash, name, description, is_active, created_at, revoked_at, last_used_at, request_count`
+		INSERT INTO api_keys (key_hash, name, description, user_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count`
 
 	var key models.APIKey
-	err := s.db.QueryRowxContext(ctx, query, keyHash, input.Name, input.Description).StructScan(&key)
+	err := s.db.QueryRowxContext(ctx, query, keyHash, input.Name, input.Description, input.UserID).StructScan(&key)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (s *PostgresStorage) CreateAPIKey(ctx context.Context, keyHash string, inpu
 // GetAPIKeyByHash retrieves an API key by its hash
 func (s *PostgresStorage) GetAPIKeyByHash(ctx context.Context, keyHash string) (*models.APIKey, error) {
 	query := `
-		SELECT id, key_hash, name, description, is_active, created_at, revoked_at, last_used_at, request_count
+		SELECT id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count
 		FROM api_keys
 		WHERE key_hash = $1`
 
@@ -53,7 +53,7 @@ func (s *PostgresStorage) GetAPIKeyByHash(ctx context.Context, keyHash string) (
 // GetAPIKeyByID retrieves an API key by its UUID
 func (s *PostgresStorage) GetAPIKeyByID(ctx context.Context, id uuid.UUID) (*models.APIKey, error) {
 	query := `
-		SELECT id, key_hash, name, description, is_active, created_at, revoked_at, last_used_at, request_count
+		SELECT id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count
 		FROM api_keys
 		WHERE id = $1`
 
@@ -72,7 +72,7 @@ func (s *PostgresStorage) GetAPIKeyByID(ctx context.Context, id uuid.UUID) (*mod
 // ListAPIKeys retrieves all API keys
 func (s *PostgresStorage) ListAPIKeys(ctx context.Context) ([]*models.APIKey, error) {
 	query := `
-		SELECT id, key_hash, name, description, is_active, created_at, revoked_at, last_used_at, request_count
+		SELECT id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count
 		FROM api_keys
 		ORDER BY created_at DESC`
 
@@ -118,7 +118,7 @@ func (s *PostgresStorage) UpdateAPIKey(ctx context.Context, id uuid.UUID, input 
 		query += clause
 	}
 	query += fmt.Sprintf(" WHERE id = $%d", argIdx)
-	query += " RETURNING id, key_hash, name, description, is_active, created_at, revoked_at, last_used_at, request_count"
+	query += " RETURNING id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count"
 	args = append(args, id)
 
 	var key models.APIKey
@@ -166,4 +166,21 @@ func (s *PostgresStorage) UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID
 
 	_, err := s.db.ExecContext(ctx, query, time.Now(), id)
 	return err
+}
+
+// ListAPIKeysByUserID retrieves all API keys owned by a specific user
+func (s *PostgresStorage) ListAPIKeysByUserID(ctx context.Context, userID uuid.UUID) ([]*models.APIKey, error) {
+	query := `
+		SELECT id, key_hash, name, description, user_id, is_active, created_at, revoked_at, last_used_at, request_count
+		FROM api_keys
+		WHERE user_id = $1
+		ORDER BY created_at DESC`
+
+	var keys []*models.APIKey
+	err := s.db.SelectContext(ctx, &keys, query, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return keys, nil
 }

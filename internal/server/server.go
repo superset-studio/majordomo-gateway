@@ -26,7 +26,13 @@ type Server struct {
 	healthChecker HealthChecker
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver) *Server {
+type AdminConfig struct {
+	AdminHandler *api.AdminHandler
+	JWTService   *auth.JWTService
+	CORSOrigins  []string
+}
+
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -38,8 +44,35 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 	router.Use(RequestID)
 	router.Use(Logger)
 
+	if adminCfg != nil && len(adminCfg.CORSOrigins) > 0 {
+		router.Use(CORSMiddleware(adminCfg.CORSOrigins))
+	}
+
 	router.Get("/health", healthHandler)
 	router.Get("/readyz", s.readyzHandler)
+
+	if adminCfg != nil && adminCfg.AdminHandler != nil && adminCfg.JWTService != nil {
+		router.Route("/api/v1/admin", func(r chi.Router) {
+			r.Post("/login", adminCfg.AdminHandler.Login)
+			r.Group(func(r chi.Router) {
+				r.Use(api.JWTAuthMiddleware(adminCfg.JWTService))
+				r.Get("/me", adminCfg.AdminHandler.Me)
+				r.Put("/me/password", adminCfg.AdminHandler.ChangePassword)
+				r.Get("/api-keys", adminCfg.AdminHandler.ListAPIKeys)
+				r.Post("/api-keys", adminCfg.AdminHandler.CreateAPIKey)
+				r.Get("/api-keys/{id}", adminCfg.AdminHandler.GetAPIKey)
+				r.Put("/api-keys/{id}", adminCfg.AdminHandler.UpdateAPIKey)
+				r.Delete("/api-keys/{id}", adminCfg.AdminHandler.RevokeAPIKey)
+				r.Get("/api-keys/{id}/proxy-keys", adminCfg.AdminHandler.ListProxyKeys)
+				r.Post("/api-keys/{id}/proxy-keys", adminCfg.AdminHandler.CreateProxyKey)
+				r.Get("/api-keys/{id}/proxy-keys/{pkId}", adminCfg.AdminHandler.GetProxyKey)
+				r.Delete("/api-keys/{id}/proxy-keys/{pkId}", adminCfg.AdminHandler.RevokeProxyKey)
+				r.Get("/api-keys/{id}/proxy-keys/{pkId}/providers", adminCfg.AdminHandler.ListProviderMappings)
+				r.Put("/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}", adminCfg.AdminHandler.SetProviderMapping)
+				r.Delete("/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}", adminCfg.AdminHandler.DeleteProviderMapping)
+			})
+		})
+	}
 
 	if apiHandler != nil {
 		router.Route("/api/v1", func(r chi.Router) {

@@ -6,12 +6,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// User represents a web UI user stored in the database
+type User struct {
+	ID           uuid.UUID `json:"id" db:"id"`
+	Username     string    `json:"username" db:"username"`
+	PasswordHash string    `json:"-" db:"password_hash"`
+	IsActive     bool      `json:"is_active" db:"is_active"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+}
+
+// CreateUserInput contains fields for creating a new user
+type CreateUserInput struct {
+	Username string
+	Password string
+}
+
 // APIKey represents a Majordomo API key stored in the database
 type APIKey struct {
 	ID           uuid.UUID  `json:"id" db:"id"`
 	KeyHash      string     `json:"-" db:"key_hash"` // Never expose in JSON
 	Name         string     `json:"name" db:"name"`
 	Description  *string    `json:"description,omitempty" db:"description"`
+	UserID       *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
 	IsActive     bool       `json:"is_active" db:"is_active"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	RevokedAt    *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
@@ -23,6 +39,7 @@ type APIKey struct {
 type CreateAPIKeyInput struct {
 	Name        string
 	Description *string
+	UserID      *uuid.UUID
 }
 
 // UpdateAPIKeyInput contains fields for updating an API key

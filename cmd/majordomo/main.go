@@ -33,6 +33,8 @@ func main() {
 		runKeys(os.Args[2:])
 	case "proxy-keys":
 		runProxyKeys(os.Args[2:])
+	case "users":
+		runUsers(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -49,6 +51,7 @@ Commands:
   serve        Start the proxy server
   keys         Manage API keys
   proxy-keys   Manage proxy keys
+  users        Manage web UI users
 
 Run 'majordomo <command> --help' for more information.`)
 }
@@ -118,7 +121,30 @@ func runServe(args []string) {
 
 	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, cfg)
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver)
+	// Set up admin web UI if JWT secret is configured
+	var adminCfg *server.AdminConfig
+	if cfg.JWT.Secret != "" {
+		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
+
+		var adminSecretStore secrets.SecretStore
+		if cfg.Secrets.EncryptionKey != "" {
+			adminSecretStore, err = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
+			if err != nil {
+				slog.Error("failed to initialize secret store for admin", "error", err)
+				os.Exit(1)
+			}
+		}
+
+		adminHandler := api.NewAdminHandler(store, store, store, adminSecretStore, jwtSvc)
+		adminCfg = &server.AdminConfig{
+			AdminHandler: adminHandler,
+			JWTService:   jwtSvc,
+			CORSOrigins:  cfg.CORS.AllowedOrigins,
+		}
+		slog.Info("admin web UI enabled")
+	}
+
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg)
 
 	errChan := make(chan error, 1)
 	go func() {

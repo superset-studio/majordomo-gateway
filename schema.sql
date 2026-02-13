@@ -119,3 +119,16 @@ CREATE TABLE IF NOT EXISTS proxy_key_provider_mappings (
 
 -- Add proxy_key_id to llm_requests
 ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS proxy_key_id UUID REFERENCES proxy_keys(id);
+
+-- Users (for web UI login)
+CREATE TABLE IF NOT EXISTS users (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username        VARCHAR(255) NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Optional user ownership of API keys
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id) WHERE user_id IS NOT NULL;
