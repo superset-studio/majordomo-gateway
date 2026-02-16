@@ -75,9 +75,10 @@ func (r *Resolver) ResolveAPIKey(ctx context.Context, apiKey string) (*models.AP
 	}
 
 	info := &models.APIKeyInfo{
-		ID:    key.ID,
-		Hash:  hash,
-		Alias: &key.Name,
+		ID:     key.ID,
+		Hash:   hash,
+		Alias:  &key.Name,
+		UserID: key.UserID,
 	}
 
 	r.cacheValid(hash, info)

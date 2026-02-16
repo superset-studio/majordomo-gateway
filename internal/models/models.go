@@ -50,9 +50,10 @@ type UpdateAPIKeyInput struct {
 
 // APIKeyInfo contains resolved API key information for request processing
 type APIKeyInfo struct {
-	ID    uuid.UUID // Database ID for FK reference
-	Hash  string    // SHA256 hash of the key
-	Alias *string   // Optional alias (key name)
+	ID     uuid.UUID  // Database ID for FK reference
+	Hash   string     // SHA256 hash of the key
+	Alias  *string    // Optional alias (key name)
+	UserID *uuid.UUID // Owning user (if key belongs to a user)
 }
 
 type UsageMetrics struct {
@@ -107,6 +108,9 @@ type RequestLog struct {
 
 	// Majordomo API key (validated, for tracking)
 	MajordomoAPIKeyID *uuid.UUID `json:"majordomo_api_key_id,omitempty" db:"majordomo_api_key_id"`
+
+	// User who owns the API key
+	UserID *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
 
 	// Proxy key (if request used a proxy key)
 	ProxyKeyID *uuid.UUID `json:"proxy_key_id,omitempty" db:"proxy_key_id"`

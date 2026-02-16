@@ -132,3 +132,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- Optional user ownership of API keys
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id) WHERE user_id IS NOT NULL;
+
+-- User ownership on LLM requests (for efficient per-user queries)
+ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
+CREATE INDEX IF NOT EXISTS idx_llm_requests_user_id_time ON llm_requests(user_id, requested_at DESC) WHERE user_id IS NOT NULL;

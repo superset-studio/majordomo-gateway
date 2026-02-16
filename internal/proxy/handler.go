@@ -219,6 +219,9 @@ func (h *Handler) logRequest(
 		// Majordomo API key (validated)
 		MajordomoAPIKeyID: &apiKeyInfo.ID,
 
+		// User who owns the API key
+		UserID: apiKeyInfo.UserID,
+
 		// Proxy key (if request used one)
 		ProxyKeyID: proxyKeyID,
 
