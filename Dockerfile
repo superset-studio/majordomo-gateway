@@ -26,8 +26,7 @@ RUN apk add --no-cache ca-certificates tzdata
 # Copy binary from builder
 COPY --from=builder /app/majordomo-proxy /app/majordomo-proxy
 
-# Copy default config files
-COPY majordomo.yaml /app/majordomo.yaml
+# Copy default config files (majordomo.yaml is mounted at runtime via /etc/majordomo/)
 COPY pricing.json /app/pricing.json
 COPY model_aliases.json /app/model_aliases.json
 
