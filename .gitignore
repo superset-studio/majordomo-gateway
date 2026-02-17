@@ -34,3 +34,10 @@ majordomo.yaml
 .idea/
 # .vscode/
 bin/
+
+# Python (replay/)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/

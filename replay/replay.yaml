@@ -1,0 +1,25 @@
+database:
+  url: postgresql://user:pass@localhost:5432/majordomo  # or set DATABASE_URL env var
+
+body_storage: postgres  # "postgres" or "s3"
+s3:                      # required only when body_storage: s3
+  bucket: my-bucket
+  region: us-east-1
+
+source:
+  filters:               # arbitrary raw_metadata key-value pairs (AND logic)
+    feature: document-classification
+    # environment: production
+    # user-id: alice
+  model: claude-sonnet-4-20250514  # optional — filter by original model
+  days: 30
+  limit: 50
+
+target:
+  provider: anthropic
+  model: claude-haiku-4-20250514
+
+judge:
+  enabled: true
+  provider: openai
+  model: gpt-4.1-mini
