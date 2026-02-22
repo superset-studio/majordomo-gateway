@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
@@ -24,6 +25,7 @@ type Handler struct {
 	pricing       *pricing.Service
 	resolver      *auth.Resolver
 	proxyResolver *auth.ProxyResolver
+	sessionMgr    *claudecode.SessionManager
 	config        *config.Config
 	providers     map[provider.Provider]string
 }
@@ -40,6 +42,7 @@ func NewHandler(
 	pricingSvc *pricing.Service,
 	resolver *auth.Resolver,
 	proxyResolver *auth.ProxyResolver,
+	sessionMgr *claudecode.SessionManager,
 	cfg *config.Config,
 ) *Handler {
 	providers := map[provider.Provider]string{
@@ -55,6 +58,7 @@ func NewHandler(
 		pricing:       pricingSvc,
 		resolver:      resolver,
 		proxyResolver: proxyResolver,
+		sessionMgr:    sessionMgr,
 		config:        cfg,
 		providers:     providers,
 	}
@@ -169,7 +173,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	// Extract Claude Code session ID if present
+	var sessionID *uuid.UUID
+	if sid := r.Header.Get("X-Majordomo-Session-Id"); sid != "" {
+		if parsed, parseErr := uuid.Parse(sid); parseErr == nil {
+			sessionID = &parsed
+		}
+	}
+
+	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
@@ -178,6 +190,7 @@ func (h *Handler) logRequest(
 	apiKeyInfo *models.APIKeyInfo,
 	providerKeyInfo *ProviderKeyInfo,
 	proxyKeyID *uuid.UUID,
+	sessionID *uuid.UUID,
 	providerInfo provider.ProviderInfo,
 	req *http.Request,
 	reqBody []byte,
@@ -284,6 +297,30 @@ func (h *Handler) logRequest(
 		}
 	}
 
+	// Attach Claude Code metadata so it's written after the llm_requests INSERT
+	if providerInfo.Provider == provider.ProviderAnthropic &&
+		req.URL.Path == "/v1/messages" &&
+		resp.StatusCode < 400 &&
+		h.sessionMgr != nil {
+		meta, parseErr := claudecode.ParseRequestResponse(reqBody, resp.Body)
+		if parseErr != nil {
+			slog.Debug("failed to parse claude code metadata", "error", parseErr)
+		} else {
+			log.ClaudeMetadata = &models.ClaudeRequestMetadata{
+				SessionID:             sessionID,
+				MessageCount:          meta.MessageCount,
+				UserMessageCount:      meta.UserMessageCount,
+				AssistantMessageCount: meta.AssistantMessageCount,
+				ToolNames:             meta.ToolNames,
+				ToolUseCount:          meta.ToolUseCount,
+				HasThinking:           meta.HasThinking,
+				IsPlanMode:            meta.IsPlanMode,
+				StopReason:            meta.StopReason,
+				SystemPromptHash:      meta.SystemPromptHash,
+			}
+		}
+	}
+
 	h.storage.WriteRequestLog(ctx, log)
 }
 
@@ -321,7 +358,7 @@ func extractCustomMetadata(headers map[string]string) map[string]string {
 	metadata := make(map[string]string)
 	for key, value := range headers {
 		// Exclude reserved headers
-		if key != "x-majordomo-key" && key != "x-majordomo-provider" && key != "x-majordomo-provider-alias" {
+		if key != "x-majordomo-key" && key != "x-majordomo-provider" && key != "x-majordomo-provider-alias" && key != "x-majordomo-session-id" {
 			cleanKey := strings.TrimPrefix(key, "x-majordomo-")
 			metadata[cleanKey] = value
 		}

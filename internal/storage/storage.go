@@ -49,3 +49,14 @@ type ProxyKeyStorage interface {
 	ListProviderMappings(ctx context.Context, proxyKeyID uuid.UUID) ([]*models.ProviderMapping, error)
 	DeleteProviderMapping(ctx context.Context, proxyKeyID uuid.UUID, provider string) error
 }
+
+// ClaudeSessionStorage defines the interface for Claude Code session and request detail operations.
+type ClaudeSessionStorage interface {
+	CreateClaudeSession(ctx context.Context, session *models.ClaudeSession) error
+	EndClaudeSession(ctx context.Context, sessionID uuid.UUID) error
+	GetClaudeSession(ctx context.Context, sessionID uuid.UUID) (*models.ClaudeSession, error)
+	ListClaudeSessions(ctx context.Context, apiKeyID uuid.UUID, limit, offset int) ([]*models.ClaudeSession, int, error)
+	UpdateClaudeSessionStats(ctx context.Context, sessionID uuid.UUID, inputTokens, outputTokens int, cost float64) error
+	CreateClaudeRequestDetail(ctx context.Context, detail *models.ClaudeRequestDetail) error
+	ListClaudeSessionRequests(ctx context.Context, sessionID uuid.UUID, limit, offset int) ([]*models.ClaudeRequestDetail, int, error)
+}

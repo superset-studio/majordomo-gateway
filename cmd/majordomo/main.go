@@ -13,6 +13,7 @@ import (
 
 	"github.com/superset-studio/majordomo-gateway/internal/api"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
 	"github.com/superset-studio/majordomo-gateway/internal/secrets"
@@ -119,7 +120,11 @@ func runServe(args []string) {
 		slog.Info("proxy key support enabled")
 	}
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, cfg)
+	// Set up Claude Code session tracking
+	sessionMgr := claudecode.NewSessionManager(store)
+	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
+
+	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig
@@ -144,7 +149,7 @@ func runServe(args []string) {
 		slog.Info("admin web UI enabled")
 	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg)
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler)
 
 	errChan := make(chan error, 1)
 	go func() {

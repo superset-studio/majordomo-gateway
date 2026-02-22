@@ -1,24 +1,30 @@
-.PHONY: help build run test clean lint fmt vet tidy docker-build docker-run compose-up compose-down
+.PHONY: help build build-companion run test clean lint fmt vet tidy docker-build docker-run compose-up compose-down
 
 BINARY_NAME=majordomo-proxy
+COMPANION_NAME=majordomo-companion
 BUILD_DIR=bin
 
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build the binary"
-	@echo "  run            - Build and run the server"
-	@echo "  test           - Run all tests"
-	@echo "  test-cover     - Run tests with coverage report"
-	@echo "  clean          - Remove build artifacts"
-	@echo "  lint           - Run golangci-lint"
-	@echo "  fmt            - Format code"
-	@echo "  vet            - Run go vet"
-	@echo "  tidy           - Run go mod tidy"
-	@echo "  docker-build   - Build Docker image"
-	@echo "  docker-run     - Run Docker container"
+	@echo "  build            - Build the gateway binary"
+	@echo "  build-companion  - Build the companion binary"
+	@echo "  run              - Build and run the server"
+	@echo "  test             - Run all tests"
+	@echo "  test-cover       - Run tests with coverage report"
+	@echo "  clean            - Remove build artifacts"
+	@echo "  lint             - Run golangci-lint"
+	@echo "  fmt              - Format code"
+	@echo "  vet              - Run go vet"
+	@echo "  tidy             - Run go mod tidy"
+	@echo "  docker-build     - Build Docker image"
+	@echo "  docker-run       - Run Docker container"
 
 build:
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/majordomo
+	go build -o $(BUILD_DIR)/$(COMPANION_NAME) ./cmd/majordomo-companion
+
+build-companion:
+	go build -o $(BUILD_DIR)/$(COMPANION_NAME) ./cmd/majordomo-companion
 
 run: build
 	./$(BUILD_DIR)/$(BINARY_NAME) serve

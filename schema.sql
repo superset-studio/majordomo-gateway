@@ -136,3 +136,39 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id) WHERE user_
 -- User ownership on LLM requests (for efficient per-user queries)
 ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id);
 CREATE INDEX IF NOT EXISTS idx_llm_requests_user_id_time ON llm_requests(user_id, requested_at DESC) WHERE user_id IS NOT NULL;
+
+-- Claude Code Sessions
+CREATE TABLE IF NOT EXISTS claude_sessions (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    majordomo_api_key_id    UUID NOT NULL REFERENCES api_keys(id),
+    started_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at                TIMESTAMPTZ,
+    total_requests          INT NOT NULL DEFAULT 0,
+    total_input_tokens      INT NOT NULL DEFAULT 0,
+    total_output_tokens     INT NOT NULL DEFAULT 0,
+    total_cost              NUMERIC(12,8) NOT NULL DEFAULT 0,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_claude_sessions_api_key_started
+    ON claude_sessions(majordomo_api_key_id, started_at DESC);
+
+-- Claude Code Request Details
+CREATE TABLE IF NOT EXISTS claude_request_details (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    llm_request_id          UUID NOT NULL UNIQUE REFERENCES llm_requests(id),
+    session_id              UUID REFERENCES claude_sessions(id),
+    message_count           INT NOT NULL DEFAULT 0,
+    user_message_count      INT NOT NULL DEFAULT 0,
+    assistant_message_count INT NOT NULL DEFAULT 0,
+    tool_names              TEXT[],
+    tool_use_count          INT NOT NULL DEFAULT 0,
+    has_thinking            BOOLEAN NOT NULL DEFAULT false,
+    is_plan_mode            BOOLEAN NOT NULL DEFAULT false,
+    stop_reason             VARCHAR(50),
+    system_prompt_hash      VARCHAR(64),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_claude_request_details_session
+    ON claude_request_details(session_id, created_at) WHERE session_id IS NOT NULL;

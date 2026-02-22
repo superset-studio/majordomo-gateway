@@ -146,6 +146,37 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 		}
 		s.registerMetadataKeys(ctx, *log.MajordomoAPIKeyID, log.RawMetadata)
 	}
+
+	// Write Claude Code request details after llm_requests row exists (FK dependency)
+	if log.ClaudeMetadata != nil {
+		m := log.ClaudeMetadata
+		detail := &models.ClaudeRequestDetail{
+			ID:                    uuid.New(),
+			LLMRequestID:          log.ID,
+			SessionID:             m.SessionID,
+			MessageCount:          m.MessageCount,
+			UserMessageCount:      m.UserMessageCount,
+			AssistantMessageCount: m.AssistantMessageCount,
+			ToolNames:             m.ToolNames,
+			ToolUseCount:          m.ToolUseCount,
+			HasThinking:           m.HasThinking,
+			IsPlanMode:            m.IsPlanMode,
+		}
+		if m.StopReason != "" {
+			detail.StopReason = &m.StopReason
+		}
+		if m.SystemPromptHash != "" {
+			detail.SystemPromptHash = &m.SystemPromptHash
+		}
+		if err := s.CreateClaudeRequestDetail(ctx, detail); err != nil {
+			slog.Error("failed to create claude request detail", "error", err, "request_id", log.ID)
+		}
+		if m.SessionID != nil {
+			if err := s.UpdateClaudeSessionStats(ctx, *m.SessionID, log.InputTokens, log.OutputTokens, log.TotalCost); err != nil {
+				slog.Error("failed to update claude session stats", "error", err, "session_id", m.SessionID)
+			}
+		}
+	}
 }
 
 func (s *PostgresStorage) registerMetadataKeys(ctx context.Context, apiKeyID uuid.UUID, metadata map[string]string) {

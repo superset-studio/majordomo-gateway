@@ -32,7 +32,7 @@ type AdminConfig struct {
 	CORSOrigins  []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -84,6 +84,17 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 			r.Put("/proxy-keys/{id}/providers/{provider}", apiHandler.SetProviderMapping)
 			r.Delete("/proxy-keys/{id}/providers/{provider}", apiHandler.DeleteProviderMapping)
 			r.Get("/proxy-keys/{id}/providers", apiHandler.ListProviderMappings)
+		})
+	}
+
+	if claudeHandler != nil {
+		router.Route("/api/v1/claude-sessions", func(r chi.Router) {
+			r.Use(api.AuthMiddleware(resolver))
+			r.Post("/", claudeHandler.StartSession)
+			r.Get("/", claudeHandler.ListSessions)
+			r.Get("/{id}", claudeHandler.GetSession)
+			r.Post("/{id}/end", claudeHandler.EndSession)
+			r.Get("/{id}/requests", claudeHandler.ListSessionRequests)
 		})
 	}
 

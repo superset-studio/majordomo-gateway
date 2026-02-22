@@ -148,4 +148,23 @@ type RequestLog struct {
 	ModelAliasFound bool              `json:"model_alias_found" db:"model_alias_found"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+
+	// Transient — not persisted in llm_requests, carried through the async
+	// write channel so claude_request_details is written after the FK target exists.
+	ClaudeMetadata *ClaudeRequestMetadata `json:"-" db:"-"`
+}
+
+// ClaudeRequestMetadata holds parsed Claude Code metadata attached to a RequestLog
+// for deferred writing after the llm_requests row is committed.
+type ClaudeRequestMetadata struct {
+	SessionID             *uuid.UUID
+	MessageCount          int
+	UserMessageCount      int
+	AssistantMessageCount int
+	ToolNames             []string
+	ToolUseCount          int
+	HasThinking           bool
+	IsPlanMode            bool
+	StopReason            string
+	SystemPromptHash      string
 }
