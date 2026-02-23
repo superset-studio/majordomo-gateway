@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
@@ -59,4 +60,38 @@ type ClaudeSessionStorage interface {
 	UpdateClaudeSessionStats(ctx context.Context, sessionID uuid.UUID, inputTokens, outputTokens int, cost float64) error
 	CreateClaudeRequestDetail(ctx context.Context, detail *models.ClaudeRequestDetail) error
 	ListClaudeSessionRequests(ctx context.Context, sessionID uuid.UUID, limit, offset int) ([]*models.ClaudeRequestDetail, int, error)
+}
+
+// MetadataKeyStorage defines the interface for metadata key management.
+type MetadataKeyStorage interface {
+	ListMetadataKeys(ctx context.Context, userID uuid.UUID) ([]*models.MetadataKey, error)
+	ActivateMetadataKey(ctx context.Context, apiKeyID uuid.UUID, keyName string) error
+	DeactivateMetadataKey(ctx context.Context, apiKeyID uuid.UUID, keyName string) error
+	UpdateMetadataKeyDisplayName(ctx context.Context, apiKeyID uuid.UUID, keyName string, displayName *string) error
+}
+
+// MetadataFilter represents a single key=value filter on indexed_metadata.
+type MetadataFilter struct {
+	Key   string
+	Value string
+}
+
+// UsageFilter holds common filters for usage reporting queries.
+type UsageFilter struct {
+	UserID          uuid.UUID
+	Start           time.Time
+	End             time.Time
+	APIKeyID        *uuid.UUID
+	MetadataFilters []MetadataFilter // AND of up to 2 key=value pairs
+}
+
+// UsageStorage defines the interface for usage reporting queries.
+type UsageStorage interface {
+	GetUsageSummary(ctx context.Context, filter *UsageFilter) (*models.UsageSummary, error)
+	GetDailyUsage(ctx context.Context, filter *UsageFilter) ([]*models.DailyUsage, error)
+	GetModelBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.ModelUsage, error)
+	GetAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.APIKeyUsage, error)
+	ListUsageRequests(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.RequestListItem, int, error)
+	GetMetadataBreakdown(ctx context.Context, filter *UsageFilter, keyName string) ([]*models.MetadataBreakdown, error)
+	GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID) (*models.RequestLog, error)
 }

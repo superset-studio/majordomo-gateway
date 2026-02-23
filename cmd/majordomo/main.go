@@ -36,6 +36,8 @@ func main() {
 		runProxyKeys(os.Args[2:])
 	case "users":
 		runUsers(os.Args[2:])
+	case "metadata":
+		runMetadata(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -53,6 +55,7 @@ Commands:
   keys         Manage API keys
   proxy-keys   Manage proxy keys
   users        Manage web UI users
+  metadata     Manage metadata indexing
 
 Run 'majordomo <command> --help' for more information.`)
 }
@@ -128,6 +131,8 @@ func runServe(args []string) {
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig
+	var usageHandler *api.UsageHandler
+	var metadataHandler *api.MetadataHandler
 	if cfg.JWT.Secret != "" {
 		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
 
@@ -141,6 +146,8 @@ func runServe(args []string) {
 		}
 
 		adminHandler := api.NewAdminHandler(store, store, store, adminSecretStore, jwtSvc)
+		usageHandler = api.NewUsageHandler(store, store)
+		metadataHandler = api.NewMetadataHandler(store, store)
 		adminCfg = &server.AdminConfig{
 			AdminHandler: adminHandler,
 			JWTService:   jwtSvc,
@@ -149,7 +156,7 @@ func runServe(args []string) {
 		slog.Info("admin web UI enabled")
 	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler)
 
 	errChan := make(chan error, 1)
 	go func() {

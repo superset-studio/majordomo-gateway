@@ -32,7 +32,7 @@ type AdminConfig struct {
 	CORSOrigins  []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -70,6 +70,21 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 				r.Get("/api-keys/{id}/proxy-keys/{pkId}/providers", adminCfg.AdminHandler.ListProviderMappings)
 				r.Put("/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}", adminCfg.AdminHandler.SetProviderMapping)
 				r.Delete("/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}", adminCfg.AdminHandler.DeleteProviderMapping)
+
+				if usageHandler != nil {
+					r.Post("/usage/summary", usageHandler.GetSummary)
+					r.Post("/usage/daily", usageHandler.GetDailyUsage)
+					r.Post("/usage/models", usageHandler.GetModelBreakdown)
+					r.Post("/usage/api-keys", usageHandler.GetAPIKeyBreakdown)
+					r.Post("/usage/requests", usageHandler.ListRequests)
+					r.Get("/usage/requests/{id}", usageHandler.GetRequestDetail)
+					r.Post("/usage/metadata/{keyName}", usageHandler.GetMetadataBreakdown)
+				}
+
+				if metadataHandler != nil {
+					r.Get("/metadata-keys", metadataHandler.ListMetadataKeys)
+					r.Put("/api-keys/{id}/metadata-keys/{keyName}", metadataHandler.UpdateMetadataKey)
+				}
 			})
 		})
 	}

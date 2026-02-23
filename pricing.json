@@ -9,17 +9,12 @@
     "output_price_per_million": 15,
     "cached_price_per_million": 0.3
   },
-  "claude-sonnet-4": {
-    "input_price_per_million": 3,
-    "output_price_per_million": 15,
-    "cached_price_per_million": 0.3
-  },
   "claude-opus-4": {
     "input_price_per_million": 15,
     "output_price_per_million": 75,
     "cached_price_per_million": 1.5
   },
-  "claude-opus-4.1": {
+  "claude-opus-4-1": {
     "input_price_per_million": 15,
     "output_price_per_million": 75,
     "cached_price_per_million": 1.5
@@ -39,7 +34,7 @@
     "output_price_per_million": 22.5,
     "cached_price_per_million": 0.6
   },
-  "claude-opus-4.5": {
+  "claude-opus-4-5": {
     "input_price_per_million": 5,
     "output_price_per_million": 25,
     "cached_price_per_million": 0.5
