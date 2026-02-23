@@ -133,6 +133,7 @@ pricing:
 | `MAJORDOMO_S3_SECRET_ACCESS_KEY` | AWS/S3 secret key |
 | `MAJORDOMO_GCS_BUCKET` | GCS bucket name |
 | `MAJORDOMO_GCS_CREDENTIALS_FILE` | Path to GCS credentials JSON file |
+| `MAJORDOMO_GCS_ENDPOINT` | GCS endpoint (for emulators) |
 
 ## Usage
 

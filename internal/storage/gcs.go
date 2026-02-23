@@ -25,6 +25,7 @@ type GCSBodyStorage struct {
 	bucket     string
 	uploadChan chan *BodyUpload
 	done       chan struct{}
+	drained    chan struct{}
 }
 
 func NewGCSBodyStorage(ctx context.Context, cfg GCSConfig) (*GCSBodyStorage, error) {
@@ -47,6 +48,7 @@ func NewGCSBodyStorage(ctx context.Context, cfg GCSConfig) (*GCSBodyStorage, err
 		bucket:     cfg.Bucket,
 		uploadChan: make(chan *BodyUpload, 1000),
 		done:       make(chan struct{}),
+		drained:    make(chan struct{}),
 	}
 
 	go g.uploadLoop()
@@ -55,6 +57,7 @@ func NewGCSBodyStorage(ctx context.Context, cfg GCSConfig) (*GCSBodyStorage, err
 }
 
 func (g *GCSBodyStorage) uploadLoop() {
+	defer close(g.drained)
 	for {
 		select {
 		case upload := <-g.uploadChan:
@@ -143,5 +146,6 @@ func (g *GCSBodyStorage) GenerateKey(keyPrefix string, requestID uuid.UUID, time
 
 func (g *GCSBodyStorage) Close() error {
 	close(g.done)
+	<-g.drained
 	return g.client.Close()
 }
