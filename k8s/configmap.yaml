@@ -29,6 +29,9 @@ data:
     s3:
       enabled: false
 
+    gcs:
+      enabled: false
+
     pricing:
       remote_url: "https://www.llm-prices.com/current-v1.json"
       refresh_interval: 1h

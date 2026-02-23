@@ -13,7 +13,7 @@ A lightweight LLM API gateway that proxies requests to upstream providers (OpenA
 - **Automatic cost calculation** - Track spending with real-time pricing data from [llm-prices.com](https://llm-prices.com)
 - **Usage logging** - Store request logs in PostgreSQL with token counts, latency, and costs
 - **Custom metadata** - Attach custom headers (`X-Majordomo-*`) for tracking by user, feature, environment, etc.
-- **Body storage** - Optionally store full request/response bodies in S3 or PostgreSQL
+- **Body storage** - Optionally store full request/response bodies in S3, Google Cloud Storage, or PostgreSQL
 - **Zero-config provider detection** - Automatically detects provider from request path
 
 ## Documentation
@@ -26,7 +26,7 @@ A lightweight LLM API gateway that proxies requests to upstream providers (OpenA
 
 - Go 1.25+
 - PostgreSQL 14+
-- (Optional) S3-compatible storage for body logging
+- (Optional) S3-compatible or GCS storage for body logging
 
 ### 1. Clone and build
 
@@ -102,12 +102,18 @@ storage:
     max_conns: 20
 
 logging:
-  body_storage: "none"  # "none", "postgres", or "s3"
+  body_storage: "none"  # "none", "postgres", "s3", or "gcs"
 
 s3:
   enabled: true
   bucket: "majordomo-logs"
   region: "us-east-1"
+
+gcs:
+  enabled: false
+  bucket: "majordomo-logs"
+  credentials_file: ""  # Leave empty for Application Default Credentials
+  endpoint: ""          # Leave empty for production GCS
 
 pricing:
   remote_url: "https://www.llm-prices.com/current-v1.json"
@@ -125,6 +131,8 @@ pricing:
 | `MAJORDOMO_STORAGE_POSTGRES_DATABASE` | PostgreSQL database |
 | `MAJORDOMO_S3_ACCESS_KEY_ID` | AWS/S3 access key |
 | `MAJORDOMO_S3_SECRET_ACCESS_KEY` | AWS/S3 secret key |
+| `MAJORDOMO_GCS_BUCKET` | GCS bucket name |
+| `MAJORDOMO_GCS_CREDENTIALS_FILE` | Path to GCS credentials JSON file |
 
 ## Usage
 
@@ -245,7 +253,7 @@ docker run -p 7680:7680 \
                 ┌───────────┴───────────┐
                 ▼                       ▼
         ┌──────────────┐        ┌─────────────┐
-        │  PostgreSQL  │        │     S3      │
+        │  PostgreSQL  │        │   S3 / GCS  │
         │ (logs, costs,│        │  (request/  │
         │   metadata)  │        │   response  │
         └──────────────┘        │   bodies)   │
@@ -261,7 +269,7 @@ docker run -p 7680:7680 \
 5. Response is parsed for token usage
 6. Cost is calculated using current pricing data
 7. Request log is written to PostgreSQL asynchronously (linked to API key)
-8. (Optional) Full request/response bodies stored in S3
+8. (Optional) Full request/response bodies stored in S3 or GCS
 9. Response is returned to client
 
 ## Database schema

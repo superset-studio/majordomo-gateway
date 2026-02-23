@@ -21,7 +21,7 @@ import (
 type Handler struct {
 	upstream      *UpstreamClient
 	storage       storage.Storage
-	s3Storage     *storage.S3BodyStorage
+	bodyStorage   storage.BodyStorage
 	pricing       *pricing.Service
 	resolver      *auth.Resolver
 	proxyResolver *auth.ProxyResolver
@@ -38,7 +38,7 @@ type ProviderKeyInfo struct {
 
 func NewHandler(
 	storage storage.Storage,
-	s3Storage *storage.S3BodyStorage,
+	bodyStorage storage.BodyStorage,
 	pricingSvc *pricing.Service,
 	resolver *auth.Resolver,
 	proxyResolver *auth.ProxyResolver,
@@ -54,7 +54,7 @@ func NewHandler(
 	return &Handler{
 		upstream:      NewUpstreamClient(),
 		storage:       storage,
-		s3Storage:     s3Storage,
+		bodyStorage:   bodyStorage,
 		pricing:       pricingSvc,
 		resolver:      resolver,
 		proxyResolver: proxyResolver,
@@ -268,13 +268,16 @@ func (h *Handler) logRequest(
 	}
 
 	switch h.config.Logging.BodyStorage {
-	case "s3":
-		if h.s3Storage != nil {
-			s3Key := h.s3Storage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
-			log.BodyS3Key = &s3Key
+	case "s3", "gcs":
+		if h.bodyStorage != nil {
+			key := h.bodyStorage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
+			log.BodyStorageKey = &key
+			if h.config.Logging.BodyStorage == "s3" {
+				log.BodyS3Key = &key
+			}
 
-			h.s3Storage.Upload(&storage.BodyUpload{
-				Key:             s3Key,
+			h.bodyStorage.Upload(&storage.BodyUpload{
+				Key:             key,
 				RequestID:       requestID,
 				Timestamp:       requestedAt,
 				RequestMethod:   req.Method,

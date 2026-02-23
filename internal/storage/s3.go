@@ -37,21 +37,21 @@ type BodyUpload struct {
 	ResponseBody    []byte
 }
 
-type S3BodyContent struct {
-	RequestID string            `json:"request_id"`
-	Timestamp string            `json:"timestamp"`
-	Request   S3RequestContent  `json:"request"`
-	Response  S3ResponseContent `json:"response"`
+type BodyContent struct {
+	RequestID string          `json:"request_id"`
+	Timestamp string          `json:"timestamp"`
+	Request   RequestContent  `json:"request"`
+	Response  ResponseContent `json:"response"`
 }
 
-type S3RequestContent struct {
+type RequestContent struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    json.RawMessage   `json:"body,omitempty"`
 }
 
-type S3ResponseContent struct {
+type ResponseContent struct {
 	StatusCode int               `json:"status_code"`
 	Headers    map[string]string `json:"headers,omitempty"`
 	Body       json.RawMessage   `json:"body,omitempty"`
@@ -119,16 +119,16 @@ func (s *S3BodyStorage) uploadLoop() {
 func (s *S3BodyStorage) doUpload(upload *BodyUpload) {
 	ctx := context.Background()
 
-	content := S3BodyContent{
+	content := BodyContent{
 		RequestID: upload.RequestID.String(),
 		Timestamp: upload.Timestamp.UTC().Format(time.RFC3339),
-		Request: S3RequestContent{
+		Request: RequestContent{
 			Method:  upload.RequestMethod,
 			Path:    upload.RequestPath,
 			Headers: upload.RequestHeaders,
 			Body:    toJSONRawMessage(upload.RequestBody),
 		},
-		Response: S3ResponseContent{
+		Response: ResponseContent{
 			StatusCode: upload.ResponseStatus,
 			Headers:    upload.ResponseHeaders,
 			Body:       toJSONRawMessage(upload.ResponseBody),
@@ -137,14 +137,14 @@ func (s *S3BodyStorage) doUpload(upload *BodyUpload) {
 
 	jsonData, err := json.Marshal(content)
 	if err != nil {
-		slog.Error("failed to marshal S3 body content", "error", err, "request_id", upload.RequestID)
+		slog.Error("failed to marshal body content", "error", err, "request_id", upload.RequestID)
 		return
 	}
 
 	var buf bytes.Buffer
 	gzWriter := gzip.NewWriter(&buf)
 	if _, err := gzWriter.Write(jsonData); err != nil {
-		slog.Error("failed to gzip S3 body content", "error", err, "request_id", upload.RequestID)
+		slog.Error("failed to gzip body content", "error", err, "request_id", upload.RequestID)
 		return
 	}
 	if err := gzWriter.Close(); err != nil {

@@ -120,9 +120,9 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 			input_tokens, output_tokens, cached_tokens, cache_creation_tokens,
 			input_cost, output_cost, total_cost,
 			status_code, error_message, raw_metadata, indexed_metadata,
-			request_body, response_body, body_s3_key, model_alias_found
+			request_body, response_body, body_s3_key, model_alias_found, body_storage_key
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
 		)`
 
 	_, err = s.db.ExecContext(ctx, query,
@@ -132,7 +132,7 @@ func (s *PostgresStorage) writeLog(log *models.RequestLog) {
 		log.InputTokens, log.OutputTokens, log.CachedTokens, log.CacheCreationTokens,
 		log.InputCost, log.OutputCost, log.TotalCost,
 		log.StatusCode, log.ErrorMessage, rawMetadataJSON, indexedMetadataJSON,
-		log.RequestBody, log.ResponseBody, log.BodyS3Key, log.ModelAliasFound,
+		log.RequestBody, log.ResponseBody, log.BodyS3Key, log.ModelAliasFound, log.BodyStorageKey,
 	)
 	if err != nil {
 		slog.Error("failed to write request log", "error", err, "request_id", log.ID)

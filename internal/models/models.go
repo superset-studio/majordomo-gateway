@@ -145,6 +145,7 @@ type RequestLog struct {
 	RequestBody     *string           `json:"request_body,omitempty" db:"request_body"`
 	ResponseBody    *string           `json:"response_body,omitempty" db:"response_body"`
 	BodyS3Key       *string           `json:"body_s3_key,omitempty" db:"body_s3_key"`
+	BodyStorageKey  *string           `json:"body_storage_key,omitempty" db:"body_storage_key"`
 	ModelAliasFound bool              `json:"model_alias_found" db:"model_alias_found"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`

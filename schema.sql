@@ -172,3 +172,8 @@ CREATE TABLE IF NOT EXISTS claude_request_details (
 
 CREATE INDEX IF NOT EXISTS idx_claude_request_details_session
     ON claude_request_details(session_id, created_at) WHERE session_id IS NOT NULL;
+
+-- Generic body storage key (supports S3, GCS, and future backends)
+ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS body_storage_key TEXT;
+UPDATE llm_requests SET body_storage_key = body_s3_key
+    WHERE body_s3_key IS NOT NULL AND body_storage_key IS NULL;

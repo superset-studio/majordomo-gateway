@@ -284,7 +284,7 @@ const requestLogColumns = `id, user_id, majordomo_api_key_id, proxy_key_id, prov
 	input_tokens, output_tokens, cached_tokens, cache_creation_tokens,
 	input_cost, output_cost, total_cost,
 	status_code, error_message, raw_metadata, indexed_metadata,
-	request_body, response_body, body_s3_key, model_alias_found, created_at`
+	request_body, response_body, body_s3_key, model_alias_found, created_at, body_storage_key`
 
 func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID) (*models.RequestLog, error) {
 	query := `SELECT ` + requestLogColumns + ` FROM llm_requests WHERE id = $1 AND user_id = $2`
@@ -321,6 +321,7 @@ func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.U
 		bodyS3Key           *string
 		modelAliasFound     bool
 		createdAt           time.Time
+		bodyStorageKey      *string
 	)
 
 	err := sqlRow.Scan(
@@ -330,7 +331,7 @@ func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.U
 		&inputTokens, &outputTokens, &cachedTokens, &cacheCreationTokens,
 		&inputCost, &outputCost, &totalCost,
 		&statusCode, &errorMessage, &rawMetadataJSON, &indexedMetadataJSON,
-		&requestBody, &responseBody, &bodyS3Key, &modelAliasFound, &createdAt,
+		&requestBody, &responseBody, &bodyS3Key, &modelAliasFound, &createdAt, &bodyStorageKey,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -365,6 +366,7 @@ func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.U
 		RequestBody:         requestBody,
 		ResponseBody:        responseBody,
 		BodyS3Key:           bodyS3Key,
+		BodyStorageKey:      bodyStorageKey,
 		ModelAliasFound:     modelAliasFound,
 		CreatedAt:           createdAt,
 	}

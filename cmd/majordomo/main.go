@@ -90,21 +90,41 @@ func runServe(args []string) {
 	)
 	defer pricingSvc.Close()
 
-	var s3Storage *storage.S3BodyStorage
+	if cfg.S3.Enabled && cfg.GCS.Enabled {
+		slog.Error("cannot enable both S3 and GCS body storage simultaneously")
+		os.Exit(1)
+	}
+
+	var bodyStorage storage.BodyStorage
 	if cfg.S3.Enabled {
-		s3Storage, err = storage.NewS3BodyStorage(ctx, storage.S3Config{
+		s3Storage, s3Err := storage.NewS3BodyStorage(ctx, storage.S3Config{
 			Bucket:          cfg.S3.Bucket,
 			Region:          cfg.S3.Region,
 			Endpoint:        cfg.S3.Endpoint,
 			AccessKeyID:     cfg.S3.AccessKeyID,
 			SecretAccessKey: cfg.S3.SecretAccessKey,
 		})
-		if err != nil {
-			slog.Error("failed to initialize S3 storage", "error", err)
+		if s3Err != nil {
+			slog.Error("failed to initialize S3 storage", "error", s3Err)
 			os.Exit(1)
 		}
 		defer s3Storage.Close()
+		bodyStorage = s3Storage
 		slog.Info("S3 body storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
+	}
+	if cfg.GCS.Enabled {
+		gcsStorage, gcsErr := storage.NewGCSBodyStorage(ctx, storage.GCSConfig{
+			Bucket:          cfg.GCS.Bucket,
+			CredentialsFile: cfg.GCS.CredentialsFile,
+			Endpoint:        cfg.GCS.Endpoint,
+		})
+		if gcsErr != nil {
+			slog.Error("failed to initialize GCS storage", "error", gcsErr)
+			os.Exit(1)
+		}
+		defer gcsStorage.Close()
+		bodyStorage = gcsStorage
+		slog.Info("GCS body storage enabled", "bucket", cfg.GCS.Bucket)
 	}
 
 	resolver := auth.NewResolver(store)
@@ -127,7 +147,7 @@ func runServe(args []string) {
 	sessionMgr := claudecode.NewSessionManager(store)
 	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	proxyHandler := proxy.NewHandler(store, bodyStorage, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig
