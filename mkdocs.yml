@@ -44,4 +44,5 @@ nav:
     - Kubernetes: deployment/kubernetes.md
     - Docker (standalone): deployment/docker-standalone.md
     - Health Endpoints: deployment/health-endpoints.md
+  - Claude Code Guide: claude-code-guide.md
   - Pydantic AI Guide: pydantic-ai-guide.md
