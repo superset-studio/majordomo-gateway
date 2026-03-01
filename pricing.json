@@ -34,6 +34,11 @@
     "output_price_per_million": 22.5,
     "cached_price_per_million": 0.6
   },
+  "claude-opus-4-6": {
+    "input_price_per_million": 5,
+    "output_price_per_million": 25,
+    "cached_price_per_million": 0.5
+  },
   "claude-opus-4-5": {
     "input_price_per_million": 5,
     "output_price_per_million": 25,

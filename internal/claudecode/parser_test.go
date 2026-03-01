@@ -198,6 +198,27 @@ func TestParseRequestResponse(t *testing.T) {
 			wantSystemHashEmpty: true,
 		},
 		{
+			name: "streaming SSE response with tool use and thinking",
+			reqBody: []byte(`{
+				"system": "You are a coding assistant.",
+				"messages": [
+					{"role": "user", "content": "Read the file"},
+					{"role": "assistant", "content": "Sure"},
+					{"role": "user", "content": "Now edit it"}
+				],
+				"tools": [{"name": "Read"}, {"name": "Write"}, {"name": "Edit"}]
+			}`),
+			respBody: []byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-4-6\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Read\",\"input\":{}}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Edit\",\"input\":{}}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"),
+			wantMessageCount:      3,
+			wantUserMsgCount:      2,
+			wantAssistantMsgCount: 1,
+			wantToolNames:         []string{"Edit", "Read"},
+			wantToolUseCount:      2,
+			wantHasThinking:       true,
+			wantIsPlanMode:        false,
+			wantStopReason:        "tool_use",
+		},
+		{
 			name: "duplicate tool names in response deduplicated and sorted",
 			reqBody: []byte(`{
 				"messages": [{"role": "user", "content": "Do stuff"}],

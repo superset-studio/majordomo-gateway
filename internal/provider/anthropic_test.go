@@ -154,6 +154,23 @@ func TestAnthropicParser_ParseResponse(t *testing.T) {
 			wantErr:      true,
 		},
 		{
+			name: "streaming SSE response",
+			responseBody: []byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-4-6\",\"usage\":{\"input_tokens\":100,\"cache_read_input_tokens\":2048,\"cache_creation_input_tokens\":0,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":42}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"),
+			wantInput:  2148, // 100 + 2048
+			wantOutput: 42,
+			wantCached: 2048,
+			wantModel:  "claude-opus-4-6",
+		},
+		{
+			name: "streaming SSE with cache creation",
+			responseBody: []byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_02\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5-20250929\",\"usage\":{\"input_tokens\":200,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":5000,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":75}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"),
+			wantInput:         5200, // 200 + 5000
+			wantOutput:        75,
+			wantCached:        0,
+			wantCacheCreation: 5000,
+			wantModel:         "claude-sonnet-4-5-20250929",
+		},
+		{
 			name: "missing usage field returns zero tokens",
 			responseBody: []byte(`{
 				"id": "msg_abc",

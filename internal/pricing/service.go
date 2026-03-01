@@ -100,7 +100,12 @@ func (s *Service) loadPricing() {
 		if err := s.fetchRemote(); err != nil {
 			slog.Warn("failed to fetch remote pricing, using fallback", "error", err)
 			s.loadFallback()
+			return
 		}
+		// Merge fallback entries that are missing from the remote data,
+		// so pricing.json acts as a supplement for models not yet in the
+		// remote source.
+		s.mergeFallback()
 	} else {
 		s.loadFallback()
 	}
@@ -176,6 +181,36 @@ func (s *Service) loadFallback() {
 	slog.Info("loaded pricing data from fallback", "models", len(pricing))
 }
 
+func (s *Service) mergeFallback() {
+	data, err := os.ReadFile(s.fallbackFile)
+	if err != nil {
+		return
+	}
+
+	var fallbackData map[string]fallbackPriceEntry
+	if err := json.Unmarshal(data, &fallbackData); err != nil {
+		return
+	}
+
+	s.mu.Lock()
+	added := 0
+	for model, entry := range fallbackData {
+		if _, exists := s.pricing[model]; !exists {
+			s.pricing[model] = ModelPricing{
+				InputPricePerMillion:  entry.InputPricePerMillion,
+				OutputPricePerMillion: entry.OutputPricePerMillion,
+				CachedPricePerMillion: entry.CachedPricePerMillion,
+			}
+			added++
+		}
+	}
+	s.mu.Unlock()
+
+	if added > 0 {
+		slog.Info("merged fallback pricing for models missing from remote", "count", added)
+	}
+}
+
 func (s *Service) refreshLoop() {
 	ticker := time.NewTicker(s.refreshInterval)
 	defer ticker.Stop()
@@ -185,6 +220,8 @@ func (s *Service) refreshLoop() {
 		case <-ticker.C:
 			if err := s.fetchRemote(); err != nil {
 				slog.Warn("failed to refresh pricing", "error", err)
+			} else {
+				s.mergeFallback()
 			}
 		case <-s.done:
 			return

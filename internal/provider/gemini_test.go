@@ -192,6 +192,40 @@ func TestGeminiParser_ParseResponse(t *testing.T) {
 			wantErr:      true,
 		},
 		{
+			name: "streaming JSON array response",
+			responseBody: []byte(`[
+				{
+					"candidates": [{"content": {"parts": [{"text": "Hel"}], "role": "model"}}],
+					"modelVersion": "gemini-2.0-flash-001"
+				},
+				{
+					"candidates": [{"content": {"parts": [{"text": "lo!"}], "role": "model"}}],
+					"modelVersion": "gemini-2.0-flash-001"
+				},
+				{
+					"candidates": [{"content": {"parts": [{"text": ""}], "role": "model"}, "finishReason": "STOP"}],
+					"usageMetadata": {
+						"promptTokenCount": 25,
+						"candidatesTokenCount": 40,
+						"totalTokenCount": 65,
+						"cachedContentTokenCount": 10
+					},
+					"modelVersion": "gemini-2.0-flash-001"
+				}
+			]`),
+			wantInput:  25,
+			wantOutput: 40,
+			wantCached: 10,
+			wantModel:  "gemini-2.0-flash-001",
+		},
+		{
+			name:         "streaming empty JSON array",
+			responseBody: []byte(`[]`),
+			wantInput:    0,
+			wantOutput:   0,
+			wantModel:    "",
+		},
+		{
 			name: "missing usageMetadata returns zero tokens",
 			responseBody: []byte(`{
 				"candidates": [],

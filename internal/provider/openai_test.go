@@ -202,6 +202,30 @@ func TestOpenAIParser_ParseResponse(t *testing.T) {
 			responseBody: []byte(``),
 			wantErr:      true,
 		},
+		{
+			name: "streaming SSE with usage",
+			responseBody: []byte("data: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-2024-08-06\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0}],\"usage\":null}\n\ndata: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-2024-08-06\",\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"index\":0}],\"usage\":null}\n\ndata: {\"id\":\"chatcmpl-abc\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-2024-08-06\",\"choices\":[],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":9,\"total_tokens\":22,\"prompt_tokens_details\":{\"cached_tokens\":5}}}\n\ndata: [DONE]\n\n"),
+			wantInput:  13,
+			wantOutput: 9,
+			wantCached: 5,
+			wantModel:  "gpt-4o-2024-08-06",
+		},
+		{
+			name: "streaming SSE without usage (stream_options not set)",
+			responseBody: []byte("data: {\"id\":\"chatcmpl-xyz\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-2024-08-06\",\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"index\":0}]}\n\ndata: {\"id\":\"chatcmpl-xyz\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-4o-2024-08-06\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}]}\n\ndata: [DONE]\n\n"),
+			wantInput:  0,
+			wantOutput: 0,
+			wantCached: 0,
+			wantModel:  "gpt-4o-2024-08-06",
+		},
+		{
+			name: "streaming SSE Responses API format",
+			responseBody: []byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_abc\",\"model\":\"o3-mini-2025-01-31\",\"status\":\"in_progress\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_abc\",\"model\":\"o3-mini-2025-01-31\",\"status\":\"completed\",\"usage\":{\"input_tokens\":500,\"output_tokens\":1000,\"total_tokens\":1500,\"input_tokens_details\":{\"cached_tokens\":200},\"output_tokens_details\":{\"reasoning_tokens\":600}}}}\n\ndata: [DONE]\n\n"),
+			wantInput:  500,
+			wantOutput: 1000,
+			wantCached: 200,
+			wantModel:  "o3-mini-2025-01-31",
+		},
 	}
 
 	for _, tt := range tests {

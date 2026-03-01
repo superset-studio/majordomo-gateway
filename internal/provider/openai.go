@@ -1,7 +1,10 @@
 package provider
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"strings"
 
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 )
@@ -36,11 +39,89 @@ type openAIResponse struct {
 }
 
 func (p *OpenAIParser) ParseResponse(body []byte) (*models.UsageMetrics, error) {
+	if isSSEResponse(body) {
+		return p.parseStreamingResponse(body)
+	}
+
 	var resp openAIResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
 
+	return buildOpenAIMetrics(&resp), nil
+}
+
+func (p *OpenAIParser) ExtractModel(requestBody []byte) string {
+	return extractModelFromRequest(requestBody)
+}
+
+// parseStreamingResponse extracts usage from the last SSE data chunk that
+// contains a non-null "usage" field (sent when stream_options.include_usage
+// is true). Falls back to model extraction from any chunk.
+func (p *OpenAIParser) parseStreamingResponse(body []byte) (*models.UsageMetrics, error) {
+	var lastModel string
+	var usageChunk []byte
+
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			continue
+		}
+
+		// Track model from every chunk — check both top-level and nested
+		var peek struct {
+			Model    string           `json:"model"`
+			Usage    *json.RawMessage `json:"usage"`
+			Response *json.RawMessage `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(data), &peek); err != nil {
+			continue
+		}
+		if peek.Model != "" {
+			lastModel = peek.Model
+		}
+		// Keep the last chunk that has a non-null usage object
+		if peek.Usage != nil && string(*peek.Usage) != "null" {
+			usageChunk = []byte(data)
+		}
+		// Responses API streaming: usage is inside "response" object
+		if peek.Response != nil {
+			var nested struct {
+				Model string           `json:"model"`
+				Usage *json.RawMessage `json:"usage"`
+			}
+			if err := json.Unmarshal(*peek.Response, &nested); err == nil {
+				if nested.Model != "" {
+					lastModel = nested.Model
+				}
+				if nested.Usage != nil && string(*nested.Usage) != "null" {
+					// Treat the nested response as the chunk to parse
+					usageChunk = *peek.Response
+				}
+			}
+		}
+	}
+
+	if usageChunk != nil {
+		var resp openAIResponse
+		if err := json.Unmarshal(usageChunk, &resp); err == nil {
+			return buildOpenAIMetrics(&resp), nil
+		}
+	}
+
+	// No usage data found (stream_options.include_usage was not set)
+	return &models.UsageMetrics{
+		Provider: string(ProviderOpenAI),
+		Model:    lastModel,
+	}, nil
+}
+
+func buildOpenAIMetrics(resp *openAIResponse) *models.UsageMetrics {
 	// Determine which API format was used based on which fields are populated
 	inputTokens := resp.Usage.PromptTokens
 	outputTokens := resp.Usage.CompletionTokens
@@ -59,9 +140,5 @@ func (p *OpenAIParser) ParseResponse(body []byte) (*models.UsageMetrics, error) 
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		CachedTokens: cachedTokens,
-	}, nil
-}
-
-func (p *OpenAIParser) ExtractModel(requestBody []byte) string {
-	return extractModelFromRequest(requestBody)
+	}
 }

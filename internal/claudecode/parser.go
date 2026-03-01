@@ -1,10 +1,13 @@
 package claudecode
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // RequestMetadata holds parsed metadata from a Claude Code request/response pair.
@@ -52,8 +55,16 @@ func ParseRequestResponse(reqBody, respBody []byte) (*RequestMetadata, error) {
 	}
 
 	var resp anthropicResponseMsg
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("parsing response body: %w", err)
+	if isSSEResponse(respBody) {
+		parsed, err := parseSSEResponse(respBody)
+		if err != nil {
+			return nil, fmt.Errorf("parsing streaming response: %w", err)
+		}
+		resp = *parsed
+	} else {
+		if err := json.Unmarshal(respBody, &resp); err != nil {
+			return nil, fmt.Errorf("parsing response body: %w", err)
+		}
 	}
 
 	meta := &RequestMetadata{}
@@ -101,6 +112,71 @@ func ParseRequestResponse(reqBody, respBody []byte) (*RequestMetadata, error) {
 	sort.Strings(meta.ToolNames)
 
 	return meta, nil
+}
+
+// isSSEResponse checks if the body is a Server-Sent Events stream.
+func isSSEResponse(body []byte) bool {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:"))
+}
+
+// parseSSEResponse reconstructs an anthropicResponseMsg from SSE events.
+// It extracts:
+//   - stop_reason from message_delta events
+//   - content blocks from content_block_start events (type and name)
+func parseSSEResponse(body []byte) (*anthropicResponseMsg, error) {
+	resp := &anthropicResponseMsg{}
+
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	var currentEvent string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			currentEvent = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+
+		switch currentEvent {
+		case "content_block_start":
+			var event struct {
+				ContentBlock struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+				} `json:"content_block"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				resp.Content = append(resp.Content, struct {
+					Type string `json:"type"`
+					Name string `json:"name"`
+				}{
+					Type: event.ContentBlock.Type,
+					Name: event.ContentBlock.Name,
+				})
+			}
+
+		case "message_delta":
+			var event struct {
+				Delta struct {
+					StopReason string `json:"stop_reason"`
+				} `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(data), &event); err == nil {
+				if event.Delta.StopReason != "" {
+					resp.StopReason = event.Delta.StopReason
+				}
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 // detectPlanMode checks if the tool set indicates Claude Code plan mode.
