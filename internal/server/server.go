@@ -32,7 +32,7 @@ type AdminConfig struct {
 	CORSOrigins  []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -81,7 +81,17 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 					r.Post("/usage/metadata/{keyName}", usageHandler.GetMetadataBreakdown)
 				}
 
-				if metadataHandler != nil {
+				if claudeAnalyticsHandler != nil {
+				r.Post("/claude/summary", claudeAnalyticsHandler.GetSummary)
+				r.Post("/claude/daily", claudeAnalyticsHandler.GetDailyStats)
+				r.Post("/claude/sessions", claudeAnalyticsHandler.ListSessions)
+				r.Post("/claude/tools", claudeAnalyticsHandler.GetToolUsage)
+				r.Post("/claude/performance", claudeAnalyticsHandler.GetPerformance)
+				r.Post("/claude/models", claudeAnalyticsHandler.GetModelUsage)
+				r.Get("/claude/sessions/{id}", claudeAnalyticsHandler.GetSessionDetail)
+			}
+
+			if metadataHandler != nil {
 					r.Get("/metadata-keys", metadataHandler.ListMetadataKeys)
 					r.Put("/api-keys/{id}/metadata-keys/{keyName}", metadataHandler.UpdateMetadataKey)
 				}

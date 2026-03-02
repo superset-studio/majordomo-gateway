@@ -85,6 +85,17 @@ type UsageFilter struct {
 	MetadataFilters []MetadataFilter // AND of up to 2 key=value pairs
 }
 
+// ClaudeAnalyticsStorage defines the interface for Claude Code analytics queries.
+type ClaudeAnalyticsStorage interface {
+	GetClaudeSummary(ctx context.Context, filter *UsageFilter) (*models.ClaudeSummary, error)
+	GetClaudeDailyStats(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeDailyStats, error)
+	ListClaudeSessionsAdmin(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.ClaudeSessionListItem, int, error)
+	GetClaudeToolUsage(ctx context.Context, filter *UsageFilter, topN int) ([]*models.ClaudeToolUsage, error)
+	GetClaudePerformance(ctx context.Context, filter *UsageFilter) (*models.ClaudePerformance, error)
+	GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID) (*models.ClaudeSessionDetail, error)
+	GetClaudeModelUsage(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeModelUsage, error)
+}
+
 // UsageStorage defines the interface for usage reporting queries.
 type UsageStorage interface {
 	GetUsageSummary(ctx context.Context, filter *UsageFilter) (*models.UsageSummary, error)

@@ -133,6 +133,7 @@ func runServe(args []string) {
 	var adminCfg *server.AdminConfig
 	var usageHandler *api.UsageHandler
 	var metadataHandler *api.MetadataHandler
+	var claudeAnalyticsHandler *api.ClaudeAnalyticsHandler
 	if cfg.JWT.Secret != "" {
 		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
 
@@ -148,6 +149,7 @@ func runServe(args []string) {
 		adminHandler := api.NewAdminHandler(store, store, store, adminSecretStore, jwtSvc)
 		usageHandler = api.NewUsageHandler(store, store)
 		metadataHandler = api.NewMetadataHandler(store, store)
+		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		adminCfg = &server.AdminConfig{
 			AdminHandler: adminHandler,
 			JWTService:   jwtSvc,
@@ -156,7 +158,7 @@ func runServe(args []string) {
 		slog.Info("admin web UI enabled")
 	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler, claudeAnalyticsHandler)
 
 	errChan := make(chan error, 1)
 	go func() {
