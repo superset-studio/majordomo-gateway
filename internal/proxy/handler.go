@@ -175,13 +175,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract Claude Code session ID if present
 	var sessionID *uuid.UUID
-	if sid := r.Header.Get("X-Majordomo-Session-Id"); sid != "" {
+	if sid := r.Header.Get("X-Majordomo-ClaudeCode-Session-Id"); sid != "" {
 		if parsed, parseErr := uuid.Parse(sid); parseErr == nil {
 			sessionID = &parsed
 		}
 	}
 
-	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	// Determine if this is a Claude Code request
+	isClaudeCode := r.Header.Get("X-Majordomo-Client") == "claude-code" || sessionID != nil
+
+	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, isClaudeCode, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
@@ -191,6 +194,7 @@ func (h *Handler) logRequest(
 	providerKeyInfo *ProviderKeyInfo,
 	proxyKeyID *uuid.UUID,
 	sessionID *uuid.UUID,
+	isClaudeCode bool,
 	providerInfo provider.ProviderInfo,
 	req *http.Request,
 	reqBody []byte,
@@ -297,8 +301,11 @@ func (h *Handler) logRequest(
 		}
 	}
 
-	// Attach Claude Code metadata so it's written after the llm_requests INSERT
-	if providerInfo.Provider == provider.ProviderAnthropic &&
+	// Attach Claude Code metadata so it's written after the llm_requests INSERT.
+	// Only parse when the request is identified as Claude Code (via X-Majordomo-Client
+	// header or X-Majordomo-ClaudeCode-Session-Id presence).
+	if isClaudeCode &&
+		providerInfo.Provider == provider.ProviderAnthropic &&
 		req.URL.Path == "/v1/messages" &&
 		resp.StatusCode < 400 &&
 		h.sessionMgr != nil {
@@ -358,7 +365,7 @@ func extractCustomMetadata(headers map[string]string) map[string]string {
 	metadata := make(map[string]string)
 	for key, value := range headers {
 		// Exclude reserved headers
-		if key != "x-majordomo-key" && key != "x-majordomo-provider" && key != "x-majordomo-provider-alias" && key != "x-majordomo-session-id" {
+		if key != "x-majordomo-key" && key != "x-majordomo-provider" && key != "x-majordomo-provider-alias" && key != "x-majordomo-client" && key != "x-majordomo-claudecode-session-id" {
 			cleanKey := strings.TrimPrefix(key, "x-majordomo-")
 			metadata[cleanKey] = value
 		}

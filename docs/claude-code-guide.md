@@ -9,11 +9,11 @@ This guide shows how to route [Claude Code](https://docs.anthropic.com/en/docs/c
 | **How** | Environment variables + `settings.json` | `majordomo-companion` local proxy |
 | **Tracks** | Per-request tokens, costs, model, metadata | Everything in Simple, plus session grouping |
 | **Session tracking** | No | Yes — groups requests into sessions with aggregates |
-| **Request detail parsing** | Yes — tool usage, thinking, plan mode | Yes |
+| **Request detail parsing** | Yes (requires `X-Majordomo-Client: claude-code` header) | Yes (companion adds it automatically) |
 | **Setup effort** | Minimal — edit one file | Run a command before each session |
 | **Best for** | Individual developers, simple cost tracking | Teams wanting session-level analytics |
 
-Both approaches log every request to `llm_requests` and parse Claude Code-specific metadata (tool usage, thinking mode, plan mode) into `claude_request_details`. The companion adds session grouping on top.
+Both approaches log every request to `llm_requests`. When the gateway sees `X-Majordomo-Client: claude-code`, it also parses Claude Code-specific metadata (tool usage, thinking mode, plan mode) into `claude_request_details`. The companion adds session grouping on top.
 
 ```
 Simple:      Claude Code  →  Majordomo Gateway  →  Anthropic API
@@ -46,10 +46,12 @@ Edit `~/.claude/settings.json` to set the gateway URL and tracking headers for e
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:7680",
-    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_your_key_here"
+    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_your_key_here\nX-Majordomo-Client: claude-code"
   }
 }
 ```
+
+The `X-Majordomo-Client: claude-code` header tells the gateway to parse Claude Code-specific metadata (tool usage, thinking mode, plan mode) into `claude_request_details`. Without it, requests are only logged to `llm_requests`.
 
 To add metadata (developer name, project, team), add more headers separated by newlines:
 
@@ -57,7 +59,7 @@ To add metadata (developer name, project, team), add more headers separated by n
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:7680",
-    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_your_key_here\nX-Majordomo-Developer: alice\nX-Majordomo-Project: backend-api\nX-Majordomo-Team: platform"
+    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_your_key_here\nX-Majordomo-Client: claude-code\nX-Majordomo-Developer: alice\nX-Majordomo-Project: backend-api\nX-Majordomo-Team: platform"
   }
 }
 ```
@@ -74,7 +76,8 @@ For one-off sessions or testing, set variables inline:
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:7680 \
-ANTHROPIC_CUSTOM_HEADERS="X-Majordomo-Key: mdm_sk_your_key_here" \
+ANTHROPIC_CUSTOM_HEADERS="X-Majordomo-Key: mdm_sk_your_key_here
+X-Majordomo-Client: claude-code" \
 claude
 ```
 
@@ -122,7 +125,7 @@ The companion:
 1. Registers a new session with the gateway
 2. Starts a local proxy on a random port
 3. Launches `claude` with `ANTHROPIC_BASE_URL` pointing at the local proxy
-4. Injects `X-Majordomo-Key` and `X-Majordomo-Session-Id` headers into every request
+4. Injects `X-Majordomo-Key`, `X-Majordomo-Client: claude-code`, and `X-Majordomo-ClaudeCode-Session-Id` headers into every request
 5. Waits for Claude Code to exit
 6. Ends the session and shuts down
 
@@ -449,7 +452,7 @@ Use a single API key and identify developers via metadata headers:
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:7680",
-    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_team_key\nX-Majordomo-Developer: alice"
+    "ANTHROPIC_CUSTOM_HEADERS": "X-Majordomo-Key: mdm_sk_team_key\nX-Majordomo-Client: claude-code\nX-Majordomo-Developer: alice"
   }
 }
 ```
@@ -528,7 +531,13 @@ Stop Options:
 
 ### `claude_request_details` rows missing
 
-The gateway only parses Anthropic Messages API responses with HTTP status < 400. If requests are failing upstream, details won't be recorded. Check that requests appear in `llm_requests` first.
+The gateway only creates `claude_request_details` rows when:
+
+1. The request includes `X-Majordomo-Client: claude-code` header (or `X-Majordomo-ClaudeCode-Session-Id`)
+2. The request is to the Anthropic Messages API (`/v1/messages`)
+3. The upstream response has HTTP status < 400
+
+If using the simple setup, make sure `X-Majordomo-Client: claude-code` is in your `ANTHROPIC_CUSTOM_HEADERS`. If requests are failing upstream, details won't be recorded. Check that requests appear in `llm_requests` first.
 
 ### Metadata not showing up
 

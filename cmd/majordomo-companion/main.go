@@ -140,7 +140,8 @@ func startProxy(gateway, apiKey string, port int, metadata map[string]string) (*
 			req.URL.Host = gatewayURL.Host
 			req.Host = gatewayURL.Host
 			req.Header.Set("X-Majordomo-Key", apiKey)
-			req.Header.Set("X-Majordomo-Session-Id", sessionID)
+			req.Header.Set("X-Majordomo-Client", "claude-code")
+			req.Header.Set("X-Majordomo-ClaudeCode-Session-Id", sessionID)
 
 			for key, value := range metadata {
 				req.Header.Set("X-Majordomo-"+key, value)
