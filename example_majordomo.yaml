@@ -1,6 +1,7 @@
 server:
   host: "0.0.0.0"
   port: 7680
+  base_url: ""  # Public URL of the gateway (e.g., "https://gateway.example.com"). Used for OAuth callbacks. Defaults to http://localhost:{port}
   read_timeout: 30s
   write_timeout: 120s
 

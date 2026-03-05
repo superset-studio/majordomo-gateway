@@ -158,7 +158,10 @@ func runServe(args []string) {
 
 		// Set up OAuth if any provider is configured
 		if cfg.OAuth.GitHub.ClientID != "" || cfg.OAuth.Google.ClientID != "" {
-			gatewayBaseURL := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+			gatewayBaseURL := cfg.Server.BaseURL
+			if gatewayBaseURL == "" {
+				gatewayBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+			}
 			oauthHandler := api.NewOAuthHandler(store, jwtSvc, cfg.OAuth, gatewayBaseURL)
 			adminCfg.OAuthHandler = oauthHandler
 			slog.Info("OAuth authentication enabled",
