@@ -32,6 +32,8 @@ type UserStorage interface {
 	CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
+	GetUserByAuthProvider(ctx context.Context, provider, providerID string) (*models.User, error)
+	CreateOAuthUser(ctx context.Context, input *models.CreateOAuthUserInput) (*models.User, error)
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 }

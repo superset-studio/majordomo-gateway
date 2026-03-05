@@ -55,3 +55,13 @@ jwt:
 
 cors:
   allowed_origins: []  # e.g., ["http://localhost:6785"] for Vite dev server
+
+# OAuth (optional) — enable GitHub and/or Google sign-in for the web UI
+oauth:
+  frontend_url: ""  # URL to redirect to after OAuth (defaults to gateway URL). e.g., "http://localhost:6785"
+  # github:
+  #   client_id: ""      # Or set MAJORDOMO_OAUTH_GITHUB_CLIENT_ID
+  #   client_secret: ""  # Or set MAJORDOMO_OAUTH_GITHUB_CLIENT_SECRET
+  # google:
+  #   client_id: ""      # Or set MAJORDOMO_OAUTH_GOOGLE_CLIENT_ID
+  #   client_secret: ""  # Or set MAJORDOMO_OAUTH_GOOGLE_CLIENT_SECRET

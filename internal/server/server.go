@@ -28,6 +28,7 @@ type Server struct {
 
 type AdminConfig struct {
 	AdminHandler *api.AdminHandler
+	OAuthHandler *api.OAuthHandler
 	JWTService   *auth.JWTService
 	CORSOrigins  []string
 }
@@ -54,6 +55,14 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 	if adminCfg != nil && adminCfg.AdminHandler != nil && adminCfg.JWTService != nil {
 		router.Route("/api/v1/admin", func(r chi.Router) {
 			r.Post("/login", adminCfg.AdminHandler.Login)
+
+			if adminCfg.OAuthHandler != nil {
+				r.Get("/auth/github", adminCfg.OAuthHandler.GitHubLogin)
+				r.Get("/auth/github/callback", adminCfg.OAuthHandler.GitHubCallback)
+				r.Get("/auth/google", adminCfg.OAuthHandler.GoogleLogin)
+				r.Get("/auth/google/callback", adminCfg.OAuthHandler.GoogleCallback)
+			}
+
 			r.Group(func(r chi.Router) {
 				r.Use(api.JWTAuthMiddleware(adminCfg.JWTService))
 				r.Get("/me", adminCfg.AdminHandler.Me)

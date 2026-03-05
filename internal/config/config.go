@@ -19,6 +19,18 @@ type Config struct {
 	Secrets   SecretsConfig   `mapstructure:"secrets"`
 	JWT       JWTConfig       `mapstructure:"jwt"`
 	CORS      CORSConfig      `mapstructure:"cors"`
+	OAuth     OAuthConfig     `mapstructure:"oauth"`
+}
+
+type OAuthConfig struct {
+	GitHub      OAuthProviderConfig `mapstructure:"github"`
+	Google      OAuthProviderConfig `mapstructure:"google"`
+	FrontendURL string              `mapstructure:"frontend_url"`
+}
+
+type OAuthProviderConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
 }
 
 type JWTConfig struct {
@@ -183,4 +195,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("jwt.expiry", 24*time.Hour)
 
 	v.SetDefault("cors.allowed_origins", []string{})
+
+	v.SetDefault("oauth.github.client_id", "")
+	v.SetDefault("oauth.github.client_secret", "")
+	v.SetDefault("oauth.google.client_id", "")
+	v.SetDefault("oauth.google.client_secret", "")
+	v.SetDefault("oauth.frontend_url", "")
 }

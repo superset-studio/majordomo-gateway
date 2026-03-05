@@ -77,7 +77,12 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if user.PasswordHash == nil {
+		http.Error(w, "this account uses OAuth sign-in", http.StatusUnauthorized)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.Password)); err != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -147,7 +152,12 @@ func (h *AdminHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+	if user.PasswordHash == nil {
+		http.Error(w, "cannot change password for OAuth accounts", http.StatusBadRequest)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
 		http.Error(w, "current password is incorrect", http.StatusBadRequest)
 		return
 	}

@@ -8,17 +8,28 @@ import (
 
 // User represents a web UI user stored in the database
 type User struct {
-	ID           uuid.UUID `json:"id" db:"id"`
-	Username     string    `json:"username" db:"username"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	IsActive     bool      `json:"is_active" db:"is_active"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	ID             uuid.UUID `json:"id" db:"id"`
+	Username       string    `json:"username" db:"username"`
+	PasswordHash   *string   `json:"-" db:"password_hash"`
+	Email          *string   `json:"email,omitempty" db:"email"`
+	AuthProvider   *string   `json:"auth_provider,omitempty" db:"auth_provider"`
+	AuthProviderID *string   `json:"-" db:"auth_provider_id"`
+	IsActive       bool      `json:"is_active" db:"is_active"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 }
 
 // CreateUserInput contains fields for creating a new user
 type CreateUserInput struct {
 	Username string
 	Password string
+}
+
+// CreateOAuthUserInput contains fields for creating a new OAuth user
+type CreateOAuthUserInput struct {
+	Username       string
+	Email          *string
+	AuthProvider   string
+	AuthProviderID string
 }
 
 // APIKey represents a Majordomo API key stored in the database
