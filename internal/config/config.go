@@ -52,11 +52,12 @@ type MetadataConfig struct {
 }
 
 type ServerConfig struct {
-	Host         string        `mapstructure:"host"`
-	Port         int           `mapstructure:"port"`
-	BaseURL      string        `mapstructure:"base_url"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	Host            string        `mapstructure:"host"`
+	Port            int           `mapstructure:"port"`
+	BaseURL         string        `mapstructure:"base_url"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	UpstreamTimeout time.Duration `mapstructure:"upstream_timeout"`
 }
 
 type StorageConfig struct {
@@ -80,10 +81,34 @@ func (p *PostgresConfig) DSN() string {
 }
 
 type LoggingConfig struct {
-	StoreRequestBody  bool   `mapstructure:"store_request_body"`
-	StoreResponseBody bool   `mapstructure:"store_response_body"`
-	MaxBodySize       int    `mapstructure:"max_body_size"`
-	BodyStorage       string `mapstructure:"body_storage"` // "none", "postgres", "s3"
+	StoreRequestBody    bool   `mapstructure:"store_request_body"`
+	StoreResponseBody   bool   `mapstructure:"store_response_body"`
+	MaxBodySize         int    `mapstructure:"max_body_size"`          // Legacy fallback
+	MaxRequestBodySize  int    `mapstructure:"max_request_body_size"`
+	MaxResponseBodySize int    `mapstructure:"max_response_body_size"`
+	BodyStorage         string `mapstructure:"body_storage"` // "none", "postgres", "s3"
+}
+
+// EffectiveMaxRequestBodySize returns MaxRequestBodySize if set, otherwise MaxBodySize.
+func (l *LoggingConfig) EffectiveMaxRequestBodySize() int {
+	if l.MaxRequestBodySize > 0 {
+		return l.MaxRequestBodySize
+	}
+	if l.MaxBodySize > 0 {
+		return l.MaxBodySize
+	}
+	return 65536
+}
+
+// EffectiveMaxResponseBodySize returns MaxResponseBodySize if set, otherwise MaxBodySize.
+func (l *LoggingConfig) EffectiveMaxResponseBodySize() int {
+	if l.MaxResponseBodySize > 0 {
+		return l.MaxResponseBodySize
+	}
+	if l.MaxBodySize > 0 {
+		return l.MaxBodySize
+	}
+	return 65536
 }
 
 type S3Config struct {
@@ -156,6 +181,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.base_url", "")
 	v.SetDefault("server.read_timeout", 30*time.Second)
 	v.SetDefault("server.write_timeout", 120*time.Second)
+	v.SetDefault("server.upstream_timeout", 120*time.Second)
 
 	v.SetDefault("storage.driver", "postgres")
 	v.SetDefault("storage.postgres.host", "localhost")
@@ -169,6 +195,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.store_request_body", false)
 	v.SetDefault("logging.store_response_body", false)
 	v.SetDefault("logging.max_body_size", 65536)
+	v.SetDefault("logging.max_request_body_size", 65536)
+	v.SetDefault("logging.max_response_body_size", 65536)
 	v.SetDefault("logging.body_storage", "none") // "none", "postgres", "s3"
 
 	v.SetDefault("s3.enabled", false)

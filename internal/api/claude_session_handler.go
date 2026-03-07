@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
@@ -34,7 +35,7 @@ type startSessionRequest struct {
 func (h *ClaudeSessionHandler) StartSession(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
 	if info == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -49,26 +50,24 @@ func (h *ClaudeSessionHandler) StartSession(w http.ResponseWriter, r *http.Reque
 	session, err := h.sessionMgr.StartSession(r.Context(), info.ID, sessionName)
 	if err != nil {
 		slog.Error("failed to start claude session", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(session)
+	httputil.WriteJSON(w, http.StatusCreated, session)
 }
 
 // EndSession handles POST /api/v1/claude-sessions/{id}/end
 func (h *ClaudeSessionHandler) EndSession(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
 	if info == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
@@ -76,38 +75,37 @@ func (h *ClaudeSessionHandler) EndSession(w http.ResponseWriter, r *http.Request
 	existing, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
-			http.Error(w, "session not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		slog.Error("failed to get claude session", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if existing.MajordomoAPIKeyID != info.ID {
-		http.Error(w, "session not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
 	session, err := h.sessionMgr.EndSession(r.Context(), id)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
-			http.Error(w, "session not found or already ended", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "session not found or already ended")
 			return
 		}
 		slog.Error("failed to end claude session", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(session)
+	httputil.WriteJSON(w, http.StatusOK, session)
 }
 
 // ListSessions handles GET /api/v1/claude-sessions
 func (h *ClaudeSessionHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
 	if info == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -116,12 +114,11 @@ func (h *ClaudeSessionHandler) ListSessions(w http.ResponseWriter, r *http.Reque
 	sessions, total, err := h.storage.ListClaudeSessions(r.Context(), info.ID, limit, offset)
 	if err != nil {
 		slog.Error("failed to list claude sessions", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"sessions":   sessions,
 		"numRecords": total,
 	})
@@ -131,47 +128,46 @@ func (h *ClaudeSessionHandler) ListSessions(w http.ResponseWriter, r *http.Reque
 func (h *ClaudeSessionHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
 	if info == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
 	session, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
-			http.Error(w, "session not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		slog.Error("failed to get claude session", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	if session.MajordomoAPIKeyID != info.ID {
-		http.Error(w, "session not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(session)
+	httputil.WriteJSON(w, http.StatusOK, session)
 }
 
 // ListSessionRequests handles GET /api/v1/claude-sessions/{id}/requests
 func (h *ClaudeSessionHandler) ListSessionRequests(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
 	if info == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
@@ -179,15 +175,15 @@ func (h *ClaudeSessionHandler) ListSessionRequests(w http.ResponseWriter, r *htt
 	session, err := h.storage.GetClaudeSession(r.Context(), id)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
-			http.Error(w, "session not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		slog.Error("failed to get claude session", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if session.MajordomoAPIKeyID != info.ID {
-		http.Error(w, "session not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
@@ -196,12 +192,11 @@ func (h *ClaudeSessionHandler) ListSessionRequests(w http.ResponseWriter, r *htt
 	details, total, err := h.storage.ListClaudeSessionRequests(r.Context(), id, limit, offset)
 	if err != nil {
 		slog.Error("failed to list claude session requests", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"requests":   details,
 		"numRecords": total,
 	})

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,6 +23,7 @@ type S3BodyStorage struct {
 	bucket     string
 	uploadChan chan *BodyUpload
 	done       chan struct{}
+	wg         sync.WaitGroup
 }
 
 type BodyUpload struct {
@@ -97,12 +99,14 @@ func NewS3BodyStorage(ctx context.Context, cfg S3Config) (*S3BodyStorage, error)
 		done:       make(chan struct{}),
 	}
 
+	s.wg.Add(1)
 	go s.uploadLoop()
 
 	return s, nil
 }
 
 func (s *S3BodyStorage) uploadLoop() {
+	defer s.wg.Done()
 	for {
 		select {
 		case upload := <-s.uploadChan:
@@ -200,6 +204,7 @@ func (s *S3BodyStorage) GenerateKey(keyPrefix string, requestID uuid.UUID, times
 
 func (s *S3BodyStorage) Close() error {
 	close(s.done)
+	s.wg.Wait()
 	return nil
 }
 

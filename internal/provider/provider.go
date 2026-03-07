@@ -77,7 +77,7 @@ func detectFromPath(path string) ProviderInfo {
 		return ProviderInfo{Provider: ProviderGemini, BaseURL: "https://generativelanguage.googleapis.com"}
 
 	default:
-		return ProviderInfo{Provider: ProviderOpenAI, BaseURL: "https://api.openai.com"}
+		return ProviderInfo{Provider: ProviderUnknown, BaseURL: ""}
 	}
 }
 

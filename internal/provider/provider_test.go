@@ -137,9 +137,15 @@ func TestProviderDetect(t *testing.T) {
 			wantProvider: ProviderGemini,
 		},
 		{
-			name:         "unknown path defaults to openai",
+			name:         "unknown path returns unknown",
 			path:         "/some/random/path",
 			headers:      map[string]string{},
+			wantProvider: ProviderUnknown,
+		},
+		{
+			name:         "explicit header with unknown path",
+			path:         "/some/random/path",
+			headers:      map[string]string{"x-majordomo-provider": "openai"},
 			wantProvider: ProviderOpenAI,
 		},
 		{

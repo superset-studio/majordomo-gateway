@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/secrets"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
@@ -16,11 +17,12 @@ import (
 
 // AdminHandler provides REST API endpoints for the admin web UI.
 type AdminHandler struct {
-	apiKeys   storage.APIKeyStorage
-	proxyKeys storage.ProxyKeyStorage
-	users     storage.UserStorage
-	secrets   secrets.SecretStore
-	jwt       *auth.JWTService
+	apiKeys     storage.APIKeyStorage
+	proxyKeys   storage.ProxyKeyStorage
+	users       storage.UserStorage
+	secrets     secrets.SecretStore
+	jwt         *auth.JWTService
+	proxyKeySvc *ProxyKeyService
 }
 
 // NewAdminHandler creates a new admin API handler.
@@ -32,11 +34,12 @@ func NewAdminHandler(
 	jwtSvc *auth.JWTService,
 ) *AdminHandler {
 	return &AdminHandler{
-		apiKeys:   apiKeys,
-		proxyKeys: proxyKeys,
-		users:     users,
-		secrets:   secretStore,
-		jwt:       jwtSvc,
+		apiKeys:     apiKeys,
+		proxyKeys:   proxyKeys,
+		users:       users,
+		secrets:     secretStore,
+		jwt:         jwtSvc,
+		proxyKeySvc: NewProxyKeyService(proxyKeys, secretStore),
 	}
 }
 
@@ -56,46 +59,45 @@ type loginResponse struct {
 func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
-		http.Error(w, "username and password are required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "username and password are required")
 		return
 	}
 
 	user, err := h.users.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
 		slog.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	if user == nil || !user.IsActive {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	if user.PasswordHash == nil {
-		http.Error(w, "this account uses OAuth sign-in", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "this account uses OAuth sign-in")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.Password)); err != nil {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	token, err := h.jwt.GenerateToken(user.ID, user.Username)
 	if err != nil {
 		slog.Error("failed to generate token", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(loginResponse{Token: token, User: user})
+	httputil.WriteJSON(w, http.StatusOK, loginResponse{Token: token, User: user})
 }
 
 // --- Me ---
@@ -104,19 +106,18 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) Me(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	user, err := h.users.GetUserByID(r.Context(), claims.UserID)
 	if err != nil {
 		slog.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	httputil.WriteJSON(w, http.StatusOK, user)
 }
 
 // --- Change Password ---
@@ -130,53 +131,52 @@ type changePasswordRequest struct {
 func (h *AdminHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.CurrentPassword == "" || req.NewPassword == "" {
-		http.Error(w, "current_password and new_password are required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "current_password and new_password are required")
 		return
 	}
 
 	user, err := h.users.GetUserByID(r.Context(), claims.UserID)
 	if err != nil {
 		slog.Error("failed to get user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	if user.PasswordHash == nil {
-		http.Error(w, "cannot change password for OAuth accounts", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "cannot change password for OAuth accounts")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
-		http.Error(w, "current password is incorrect", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "current password is incorrect")
 		return
 	}
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
 	if err != nil {
 		slog.Error("failed to hash password", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	if err := h.users.UpdateUserPassword(r.Context(), claims.UserID, string(newHash)); err != nil {
 		slog.Error("failed to update password", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // --- S3 Config ---
@@ -200,14 +200,14 @@ type s3ConfigResponse struct {
 func (h *AdminHandler) GetS3Config(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	user, err := h.users.GetUserS3Config(r.Context(), claims.UserID)
 	if err != nil {
 		slog.Error("failed to get user S3 config", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -224,35 +224,34 @@ func (h *AdminHandler) GetS3Config(w http.ResponseWriter, r *http.Request) {
 		resp.Endpoint = *user.S3Endpoint
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // UpdateS3Config handles PUT /api/v1/admin/me/s3-config
 func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	var req updateS3ConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Bucket == "" {
-		http.Error(w, "bucket is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required")
 		return
 	}
 	if req.AccessKeyID == "" || req.SecretAccessKey == "" {
-		http.Error(w, "accessKeyId and secretAccessKey are required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required")
 		return
 	}
 
 	if h.secrets == nil {
-		http.Error(w, "encryption not configured", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
 		return
 	}
 
@@ -264,14 +263,14 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 	encAccessKeyID, err := h.secrets.Encrypt(req.AccessKeyID)
 	if err != nil {
 		slog.Error("failed to encrypt S3 access key ID", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	encSecretAccessKey, err := h.secrets.Encrypt(req.SecretAccessKey)
 	if err != nil {
 		slog.Error("failed to encrypt S3 secret access key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -283,13 +282,13 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 		AccessKeyID:    req.AccessKeyID,
 		SecretAccessKey: req.SecretAccessKey,
 	}); err != nil {
-		http.Error(w, "S3 validation failed: "+err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
 		return
 	}
 
 	if err := h.users.UpdateUserS3Config(r.Context(), claims.UserID, req.Bucket, region, req.Endpoint, encAccessKeyID, encSecretAccessKey); err != nil {
 		slog.Error("failed to update user S3 config", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -300,26 +299,24 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 		CredentialsSet: true,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // DeleteS3Config handles DELETE /api/v1/admin/me/s3-config
 func (h *AdminHandler) DeleteS3Config(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	if err := h.users.ClearUserS3Config(r.Context(), claims.UserID); err != nil {
 		slog.Error("failed to clear user S3 config", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // --- API Keys ---
@@ -338,44 +335,43 @@ type adminCreateAPIKeyResponse struct {
 func (h *AdminHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	keys, err := h.apiKeys.ListAPIKeysByUserID(r.Context(), claims.UserID)
 	if err != nil {
 		slog.Error("failed to list API keys", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(keys)
+	httputil.WriteJSON(w, http.StatusOK, keys)
 }
 
 // CreateAPIKey handles POST /api/v1/admin/api-keys
 func (h *AdminHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	var req adminCreateAPIKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
 	plaintext, hash, err := auth.GenerateAPIKey()
 	if err != nil {
 		slog.Error("failed to generate API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -389,20 +385,18 @@ func (h *AdminHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	key, err := h.apiKeys.CreateAPIKey(r.Context(), hash, input)
 	if err != nil {
 		slog.Error("failed to create API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(adminCreateAPIKeyResponse{APIKey: key, Key: plaintext})
+	httputil.WriteJSON(w, http.StatusCreated, adminCreateAPIKeyResponse{APIKey: key, Key: plaintext})
 }
 
 // GetAPIKey handles GET /api/v1/admin/api-keys/{id}
 func (h *AdminHandler) GetAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -411,15 +405,14 @@ func (h *AdminHandler) GetAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(key)
+	httputil.WriteJSON(w, http.StatusOK, key)
 }
 
 // UpdateAPIKey handles PUT /api/v1/admin/api-keys/{id}
 func (h *AdminHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -433,7 +426,7 @@ func (h *AdminHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Description *string `json:"description,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -445,19 +438,18 @@ func (h *AdminHandler) UpdateAPIKey(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.apiKeys.UpdateAPIKey(r.Context(), apiKey.ID, input)
 	if err != nil {
 		slog.Error("failed to update API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updated)
+	httputil.WriteJSON(w, http.StatusOK, updated)
 }
 
 // RevokeAPIKey handles DELETE /api/v1/admin/api-keys/{id}
 func (h *AdminHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -468,12 +460,11 @@ func (h *AdminHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.apiKeys.RevokeAPIKey(r.Context(), apiKey.ID); err != nil {
 		slog.Error("failed to revoke API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "revoked"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // --- Proxy Keys (nested under API keys) ---
@@ -482,7 +473,7 @@ func (h *AdminHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListProxyKeys(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -491,22 +482,21 @@ func (h *AdminHandler) ListProxyKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keys, err := h.proxyKeys.ListProxyKeys(r.Context(), apiKey.ID)
+	keys, err := h.proxyKeySvc.ListProxyKeys(r.Context(), apiKey.ID)
 	if err != nil {
 		slog.Error("failed to list proxy keys", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(keys)
+	httputil.WriteJSON(w, http.StatusOK, keys)
 }
 
 // CreateProxyKey handles POST /api/v1/admin/api-keys/{id}/proxy-keys
 func (h *AdminHandler) CreateProxyKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -520,31 +510,19 @@ func (h *AdminHandler) CreateProxyKey(w http.ResponseWriter, r *http.Request) {
 		Description *string `json:"description,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
-	plaintext, hash, err := auth.GenerateProxyKey()
-	if err != nil {
-		slog.Error("failed to generate proxy key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	input := &models.CreateProxyKeyInput{
-		Name:        req.Name,
-		Description: req.Description,
-	}
-
-	pk, err := h.proxyKeys.CreateProxyKey(r.Context(), hash, apiKey.ID, input)
+	pk, plaintext, err := h.proxyKeySvc.CreateProxyKey(r.Context(), apiKey.ID, req.Name, req.Description)
 	if err != nil {
 		slog.Error("failed to create proxy key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -553,16 +531,14 @@ func (h *AdminHandler) CreateProxyKey(w http.ResponseWriter, r *http.Request) {
 		Key string `json:"key"`
 	}{ProxyKey: pk, Key: plaintext}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	httputil.WriteJSON(w, http.StatusCreated, resp)
 }
 
 // GetProxyKey handles GET /api/v1/admin/api-keys/{id}/proxy-keys/{pkId}
 func (h *AdminHandler) GetProxyKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -571,15 +547,14 @@ func (h *AdminHandler) GetProxyKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pk)
+	httputil.WriteJSON(w, http.StatusOK, pk)
 }
 
 // RevokeProxyKey handles DELETE /api/v1/admin/api-keys/{id}/proxy-keys/{pkId}
 func (h *AdminHandler) RevokeProxyKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -588,14 +563,13 @@ func (h *AdminHandler) RevokeProxyKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.proxyKeys.RevokeProxyKey(r.Context(), pk.ID); err != nil {
+	if err := h.proxyKeySvc.RevokeProxyKey(r.Context(), pk.ID, pk.MajordomoAPIKeyID); err != nil {
 		slog.Error("failed to revoke proxy key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "revoked"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // --- Provider Mappings (nested under proxy keys) ---
@@ -604,7 +578,7 @@ func (h *AdminHandler) RevokeProxyKey(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListProviderMappings(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -613,34 +587,21 @@ func (h *AdminHandler) ListProviderMappings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	mappings, err := h.proxyKeys.ListProviderMappings(r.Context(), pk.ID)
+	resp, err := h.proxyKeySvc.ListProviderMappings(r.Context(), pk.ID, pk.MajordomoAPIKeyID)
 	if err != nil {
 		slog.Error("failed to list provider mappings", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	// Never return encrypted keys
-	var resp []providerMappingResponse
-	for _, m := range mappings {
-		resp = append(resp, providerMappingResponse{
-			ID:         m.ID,
-			ProxyKeyID: m.ProxyKeyID,
-			Provider:   m.Provider,
-			CreatedAt:  m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt:  m.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	httputil.WriteJSON(w, http.StatusOK, resp)
 }
 
 // SetProviderMapping handles PUT /api/v1/admin/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}
 func (h *AdminHandler) SetProviderMapping(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -651,43 +612,35 @@ func (h *AdminHandler) SetProviderMapping(w http.ResponseWriter, r *http.Request
 
 	providerName := chi.URLParam(r, "provider")
 	if providerName == "" {
-		http.Error(w, "provider is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
 	var req setProviderMappingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.APIKey == "" {
-		http.Error(w, "api_key is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "api_key is required")
 		return
 	}
 
-	encrypted, err := h.secrets.Encrypt(req.APIKey)
-	if err != nil {
-		slog.Error("failed to encrypt provider key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	if err := h.proxyKeys.SetProviderMapping(r.Context(), pk.ID, providerName, encrypted); err != nil {
+	if err := h.proxyKeySvc.SetProviderMapping(r.Context(), pk.ID, pk.MajordomoAPIKeyID, providerName, req.APIKey); err != nil {
 		slog.Error("failed to set provider mapping", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "provider": providerName})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "provider": providerName})
 }
 
 // DeleteProviderMapping handles DELETE /api/v1/admin/api-keys/{id}/proxy-keys/{pkId}/providers/{provider}
 func (h *AdminHandler) DeleteProviderMapping(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -698,22 +651,21 @@ func (h *AdminHandler) DeleteProviderMapping(w http.ResponseWriter, r *http.Requ
 
 	providerName := chi.URLParam(r, "provider")
 	if providerName == "" {
-		http.Error(w, "provider is required", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
 
-	if err := h.proxyKeys.DeleteProviderMapping(r.Context(), pk.ID, providerName); err != nil {
+	if err := h.proxyKeySvc.DeleteProviderMapping(r.Context(), pk.ID, pk.MajordomoAPIKeyID, providerName); err != nil {
 		if err == storage.ErrProviderMappingNotFound {
-			http.Error(w, "provider mapping not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "provider mapping not found")
 			return
 		}
 		slog.Error("failed to delete provider mapping", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // --- Ownership verification helpers ---
@@ -723,23 +675,23 @@ func (h *AdminHandler) DeleteProviderMapping(w http.ResponseWriter, r *http.Requ
 func (h *AdminHandler) verifyAPIKeyOwnership(w http.ResponseWriter, r *http.Request, claims *auth.JWTClaims) (*models.APIKey, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid API key ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid API key ID")
 		return nil, false
 	}
 
 	key, err := h.apiKeys.GetAPIKeyByID(r.Context(), id)
 	if err != nil {
 		if err == storage.ErrAPIKeyNotFound {
-			http.Error(w, "API key not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 			return nil, false
 		}
 		slog.Error("failed to get API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return nil, false
 	}
 
 	if key.UserID == nil || *key.UserID != claims.UserID {
-		http.Error(w, "API key not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 		return nil, false
 	}
 
@@ -755,23 +707,23 @@ func (h *AdminHandler) verifyProxyKeyOwnership(w http.ResponseWriter, r *http.Re
 
 	pkID, err := uuid.Parse(chi.URLParam(r, "pkId"))
 	if err != nil {
-		http.Error(w, "invalid proxy key ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid proxy key ID")
 		return nil, nil, false
 	}
 
 	pk, err := h.proxyKeys.GetProxyKeyByID(r.Context(), pkID)
 	if err != nil {
 		if err == storage.ErrProxyKeyNotFound {
-			http.Error(w, "proxy key not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 			return nil, nil, false
 		}
 		slog.Error("failed to get proxy key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return nil, nil, false
 	}
 
 	if pk.MajordomoAPIKeyID != apiKey.ID {
-		http.Error(w, "proxy key not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "proxy key not found")
 		return nil, nil, false
 	}
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 )
 
@@ -20,7 +21,7 @@ func AuthMiddleware(resolver *auth.Resolver) func(http.Handler) http.Handler {
 			apiKey := r.Header.Get("X-Majordomo-Key")
 			info, err := resolver.ResolveAPIKey(r.Context(), apiKey)
 			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 

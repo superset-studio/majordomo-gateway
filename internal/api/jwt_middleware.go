@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 )
 
 const jwtUserInfoKey contextKey = "jwtUserInfo"
@@ -16,19 +17,19 @@ func JWTAuthMiddleware(jwtSvc *auth.JWTService) func(http.Handler) http.Handler 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
 			claims, err := jwtSvc.ValidateToken(parts[1])
 			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 

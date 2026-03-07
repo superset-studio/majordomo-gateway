@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 )
 
 type contextKey string
@@ -17,8 +19,15 @@ func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := uuid.New().String()
 		w.Header().Set("X-Request-ID", requestID)
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// GetRequestID retrieves the request ID from the context.
+func GetRequestID(ctx context.Context) string {
+	id, _ := ctx.Value(RequestIDKey).(string)
+	return id
 }
 
 func Logger(next http.Handler) http.Handler {
@@ -33,6 +42,7 @@ func Logger(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", wrapped.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
+			"request_id", GetRequestID(r.Context()),
 		)
 	})
 }
@@ -45,7 +55,7 @@ func Recovery(next http.Handler) http.Handler {
 					"error", err,
 					"stack", string(debug.Stack()),
 				)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				httputil.WriteJSONError(w, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)

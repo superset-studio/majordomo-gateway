@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/superset-studio/majordomo-gateway/internal/api"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
 )
 
@@ -172,15 +172,11 @@ func (s *Server) readyzHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
-	w.Header().Set("Content-Type", "application/json")
-
 	if err := s.healthChecker.Ping(ctx); err != nil {
 		slog.Warn("readiness check failed", "error", err)
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+		httputil.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "error", "error": err.Error()})
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

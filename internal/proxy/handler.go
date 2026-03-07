@@ -13,6 +13,7 @@ import (
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/provider"
@@ -67,7 +68,7 @@ func NewHandler(
 	}
 
 	return &Handler{
-		upstream:       NewUpstreamClient(),
+		upstream:       NewUpstreamClient(cfg.Server.UpstreamTimeout),
 		storage:        store,
 		s3Storage:      s3Storage,
 		userS3Storage:  userS3Storage,
@@ -93,7 +94,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKeyInfo, err := h.resolver.ResolveAPIKey(ctx, apiKey)
 	if err != nil {
 		slog.Debug("API key validation failed", "error", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -102,12 +103,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
 
 	headers := extractHeaders(r.Header)
 	providerInfo := provider.Detect(r.URL.Path, headers)
+
+	if providerInfo.Provider == provider.ProviderUnknown {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini). Alternatively, set X-Majordomo-Provider header.")
+		return
+	}
 
 	// Check if Authorization header contains a proxy key
 	var proxyKeyID *uuid.UUID
@@ -117,7 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		providerKey, pkID, proxyErr := h.proxyResolver.ResolveProxyKey(ctx, authKey, string(providerInfo.Provider), apiKeyInfo.ID)
 		if proxyErr != nil {
 			slog.Debug("proxy key validation failed", "error", proxyErr)
-			http.Error(w, proxyErr.Error(), http.StatusUnauthorized)
+			httputil.WriteJSONError(w, http.StatusUnauthorized, proxyErr.Error())
 			return
 		}
 		if providerKey != "" {
@@ -154,7 +160,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.upstream.Forward(ctx, baseURL, r, upstreamBody)
 	if err != nil {
 		slog.Error("upstream request failed", "error", err, "request_id", requestID)
-		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		httputil.WriteJSONError(w, http.StatusBadGateway, "upstream request failed")
 		return
 	}
 
@@ -349,11 +355,11 @@ func (h *Handler) logRequest(
 			}
 		case "postgres":
 			if h.config.Logging.StoreRequestBody {
-				body := truncateBody(string(reqBody), h.config.Logging.MaxBodySize)
+				body := truncateBody(string(reqBody), h.config.Logging.EffectiveMaxRequestBodySize())
 				log.RequestBody = &body
 			}
 			if h.config.Logging.StoreResponseBody {
-				body := truncateBody(string(resp.Body), h.config.Logging.MaxBodySize)
+				body := truncateBody(string(resp.Body), h.config.Logging.EffectiveMaxResponseBodySize())
 				log.ResponseBody = &body
 			}
 		}

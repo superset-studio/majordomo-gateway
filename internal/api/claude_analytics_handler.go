@@ -1,12 +1,12 @@
 package api
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
@@ -28,16 +28,16 @@ func (h *ClaudeAnalyticsHandler) verifyAPIKeyBelongsToUser(w http.ResponseWriter
 	key, err := h.apiKeys.GetAPIKeyByID(r.Context(), apiKeyID)
 	if err != nil {
 		if err == storage.ErrAPIKeyNotFound {
-			http.Error(w, "API key not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 			return false
 		}
 		slog.Error("failed to get API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return false
 	}
 
 	if key.UserID == nil || *key.UserID != userID {
-		http.Error(w, "API key not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 		return false
 	}
 
@@ -48,13 +48,13 @@ func (h *ClaudeAnalyticsHandler) verifyAPIKeyBelongsToUser(w http.ResponseWriter
 func (h *ClaudeAnalyticsHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -68,25 +68,24 @@ func (h *ClaudeAnalyticsHandler) GetSummary(w http.ResponseWriter, r *http.Reque
 	summary, err := h.analytics.GetClaudeSummary(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get claude summary", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	httputil.WriteJSON(w, http.StatusOK, summary)
 }
 
 // GetDailyStats handles POST /api/v1/admin/claude/daily
 func (h *ClaudeAnalyticsHandler) GetDailyStats(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -100,25 +99,24 @@ func (h *ClaudeAnalyticsHandler) GetDailyStats(w http.ResponseWriter, r *http.Re
 	daily, err := h.analytics.GetClaudeDailyStats(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get claude daily stats", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(daily)
+	httputil.WriteJSON(w, http.StatusOK, daily)
 }
 
 // ListSessions handles POST /api/v1/admin/claude/sessions
 func (h *ClaudeAnalyticsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, req, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -144,12 +142,11 @@ func (h *ClaudeAnalyticsHandler) ListSessions(w http.ResponseWriter, r *http.Req
 	sessions, total, err := h.analytics.ListClaudeSessionsAdmin(r.Context(), filter, limit, offset)
 	if err != nil {
 		slog.Error("failed to list claude sessions", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"sessions":   sessions,
 		"numRecords": total,
 	})
@@ -159,13 +156,13 @@ func (h *ClaudeAnalyticsHandler) ListSessions(w http.ResponseWriter, r *http.Req
 func (h *ClaudeAnalyticsHandler) GetToolUsage(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -179,25 +176,24 @@ func (h *ClaudeAnalyticsHandler) GetToolUsage(w http.ResponseWriter, r *http.Req
 	tools, err := h.analytics.GetClaudeToolUsage(r.Context(), filter, 20)
 	if err != nil {
 		slog.Error("failed to get claude tool usage", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tools)
+	httputil.WriteJSON(w, http.StatusOK, tools)
 }
 
 // GetPerformance handles POST /api/v1/admin/claude/performance
 func (h *ClaudeAnalyticsHandler) GetPerformance(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -211,25 +207,24 @@ func (h *ClaudeAnalyticsHandler) GetPerformance(w http.ResponseWriter, r *http.R
 	perf, err := h.analytics.GetClaudePerformance(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get claude performance", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(perf)
+	httputil.WriteJSON(w, http.StatusOK, perf)
 }
 
 // GetModelUsage handles POST /api/v1/admin/claude/models
 func (h *ClaudeAnalyticsHandler) GetModelUsage(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -243,39 +238,37 @@ func (h *ClaudeAnalyticsHandler) GetModelUsage(w http.ResponseWriter, r *http.Re
 	models, err := h.analytics.GetClaudeModelUsage(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get claude model usage", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models)
+	httputil.WriteJSON(w, http.StatusOK, models)
 }
 
 // GetSessionDetail handles GET /api/v1/admin/claude/sessions/{id}
 func (h *ClaudeAnalyticsHandler) GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid session ID")
 		return
 	}
 
 	detail, err := h.analytics.GetClaudeSessionDetail(r.Context(), id, claims.UserID)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
-			http.Error(w, "session not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		slog.Error("failed to get claude session detail", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(detail)
+	httputil.WriteJSON(w, http.StatusOK, detail)
 }

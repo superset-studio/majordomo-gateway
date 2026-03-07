@@ -1,14 +1,12 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
@@ -26,115 +24,17 @@ func NewUsageHandler(usage storage.UsageStorage, apiKeys storage.APIKeyStorage) 
 	}
 }
 
-type usageRequest struct {
-	Preset          string           `json:"preset"`
-	Start           string           `json:"start"`
-	End             string           `json:"end"`
-	APIKeyID        string           `json:"api_key_id"`
-	MetadataFilters []metadataFilter `json:"metadata_filters"`
-	Limit           int              `json:"limit"`
-	Offset          int              `json:"offset"`
-}
-
-type metadataFilter struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
-// decodeUsageRequest decodes a JSON body into a UsageFilter.
-func decodeUsageRequest(r *http.Request) (*storage.UsageFilter, *usageRequest, error) {
-	var req usageRequest
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return nil, nil, fmt.Errorf("invalid JSON body: %w", err)
-		}
-	}
-
-	if len(req.MetadataFilters) > 2 {
-		return nil, nil, fmt.Errorf("at most 2 metadata filters allowed")
-	}
-
-	filter := &storage.UsageFilter{}
-
-	// Parse API key filter
-	if req.APIKeyID != "" {
-		parsed, err := uuid.Parse(req.APIKeyID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid api_key_id: %w", err)
-		}
-		filter.APIKeyID = &parsed
-	}
-
-	// Parse metadata filters
-	for _, mf := range req.MetadataFilters {
-		if mf.Key == "" || mf.Value == "" {
-			return nil, nil, fmt.Errorf("metadata filter key and value must be non-empty")
-		}
-		filter.MetadataFilters = append(filter.MetadataFilters, storage.MetadataFilter{
-			Key:   mf.Key,
-			Value: mf.Value,
-		})
-	}
-
-	// Parse date range
-	if req.Start != "" {
-		start, err := parseDate(req.Start)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid start date: %w", err)
-		}
-		filter.Start = start
-
-		if req.End != "" {
-			end, err := parseDate(req.End)
-			if err != nil {
-				return nil, nil, fmt.Errorf("invalid end date: %w", err)
-			}
-			filter.End = end
-		} else {
-			filter.End = time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
-		}
-	} else {
-		// Use preset (default: 30d)
-		preset := req.Preset
-		if preset == "" {
-			preset = "30d"
-		}
-
-		now := time.Now().UTC()
-		filter.End = now.Truncate(24 * time.Hour).Add(24 * time.Hour)
-
-		switch preset {
-		case "7d":
-			filter.Start = filter.End.AddDate(0, 0, -7)
-		case "90d":
-			filter.Start = filter.End.AddDate(0, 0, -90)
-		default:
-			filter.Start = filter.End.AddDate(0, 0, -30)
-		}
-	}
-
-	return filter, &req, nil
-}
-
-// parseDate parses YYYY-MM-DD or RFC3339.
-func parseDate(s string) (time.Time, error) {
-	if t, err := time.Parse("2006-01-02", s); err == nil {
-		return t, nil
-	}
-	return time.Parse(time.RFC3339, s)
-}
-
 // GetSummary handles POST /api/v1/admin/usage/summary
 func (h *UsageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -142,25 +42,24 @@ func (h *UsageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	summary, err := h.usage.GetUsageSummary(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get usage summary", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	httputil.WriteJSON(w, http.StatusOK, summary)
 }
 
 // GetDailyUsage handles POST /api/v1/admin/usage/daily
 func (h *UsageHandler) GetDailyUsage(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -174,25 +73,24 @@ func (h *UsageHandler) GetDailyUsage(w http.ResponseWriter, r *http.Request) {
 	daily, err := h.usage.GetDailyUsage(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get daily usage", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(daily)
+	httputil.WriteJSON(w, http.StatusOK, daily)
 }
 
 // GetModelBreakdown handles POST /api/v1/admin/usage/models
 func (h *UsageHandler) GetModelBreakdown(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -206,25 +104,24 @@ func (h *UsageHandler) GetModelBreakdown(w http.ResponseWriter, r *http.Request)
 	models, err := h.usage.GetModelBreakdown(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get model breakdown", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models)
+	httputil.WriteJSON(w, http.StatusOK, models)
 }
 
 // GetAPIKeyBreakdown handles POST /api/v1/admin/usage/api-keys
 func (h *UsageHandler) GetAPIKeyBreakdown(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -232,25 +129,24 @@ func (h *UsageHandler) GetAPIKeyBreakdown(w http.ResponseWriter, r *http.Request
 	breakdown, err := h.usage.GetAPIKeyBreakdown(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get API key breakdown", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(breakdown)
+	httputil.WriteJSON(w, http.StatusOK, breakdown)
 }
 
 // ListRequests handles POST /api/v1/admin/usage/requests
 func (h *UsageHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	filter, req, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -276,12 +172,11 @@ func (h *UsageHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 	requests, total, err := h.usage.ListUsageRequests(r.Context(), filter, limit, offset)
 	if err != nil {
 		slog.Error("failed to list usage requests", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"requests":   requests,
 		"numRecords": total,
 	})
@@ -291,48 +186,47 @@ func (h *UsageHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 func (h *UsageHandler) GetRequestDetail(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid request ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request ID")
 		return
 	}
 
 	detail, err := h.usage.GetRequestDetail(r.Context(), id, claims.UserID)
 	if err != nil {
 		if err == storage.ErrRequestNotFound {
-			http.Error(w, "request not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "request not found")
 			return
 		}
 		slog.Error("failed to get request detail", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(detail)
+	httputil.WriteJSON(w, http.StatusOK, detail)
 }
 
 // GetMetadataBreakdown handles POST /api/v1/admin/usage/metadata/{keyName}
 func (h *UsageHandler) GetMetadataBreakdown(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	keyName := chi.URLParam(r, "keyName")
 	if keyName == "" {
-		http.Error(w, "missing key name", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "missing key name")
 		return
 	}
 
 	filter, _, err := decodeUsageRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filter.UserID = claims.UserID
@@ -346,12 +240,11 @@ func (h *UsageHandler) GetMetadataBreakdown(w http.ResponseWriter, r *http.Reque
 	breakdown, err := h.usage.GetMetadataBreakdown(r.Context(), filter, keyName)
 	if err != nil {
 		slog.Error("failed to get metadata breakdown", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(breakdown)
+	httputil.WriteJSON(w, http.StatusOK, breakdown)
 }
 
 // verifyAPIKeyBelongsToUser checks that the given API key belongs to the user.
@@ -360,16 +253,16 @@ func (h *UsageHandler) verifyAPIKeyBelongsToUser(w http.ResponseWriter, r *http.
 	key, err := h.apiKeys.GetAPIKeyByID(r.Context(), apiKeyID)
 	if err != nil {
 		if err == storage.ErrAPIKeyNotFound {
-			http.Error(w, "API key not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 			return false
 		}
 		slog.Error("failed to get API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return false
 	}
 
 	if key.UserID == nil || *key.UserID != userID {
-		http.Error(w, "API key not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 		return false
 	}
 

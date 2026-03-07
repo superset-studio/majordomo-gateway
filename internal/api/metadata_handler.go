@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
@@ -28,19 +29,18 @@ func NewMetadataHandler(metadata storage.MetadataKeyStorage, apiKeys storage.API
 func (h *MetadataHandler) ListMetadataKeys(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	keys, err := h.metadata.ListMetadataKeys(r.Context(), claims.UserID)
 	if err != nil {
 		slog.Error("failed to list metadata keys", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(keys)
+	httputil.WriteJSON(w, http.StatusOK, keys)
 }
 
 type updateMetadataKeyRequest struct {
@@ -52,19 +52,19 @@ type updateMetadataKeyRequest struct {
 func (h *MetadataHandler) UpdateMetadataKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	apiKeyID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		http.Error(w, "invalid API key ID", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid API key ID")
 		return
 	}
 
 	keyName := chi.URLParam(r, "keyName")
 	if keyName == "" {
-		http.Error(w, "missing key name", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "missing key name")
 		return
 	}
 
@@ -72,21 +72,21 @@ func (h *MetadataHandler) UpdateMetadataKey(w http.ResponseWriter, r *http.Reque
 	key, err := h.apiKeys.GetAPIKeyByID(r.Context(), apiKeyID)
 	if err != nil {
 		if err == storage.ErrAPIKeyNotFound {
-			http.Error(w, "API key not found", http.StatusNotFound)
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 			return
 		}
 		slog.Error("failed to get API key", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if key.UserID == nil || *key.UserID != claims.UserID {
-		http.Error(w, "API key not found", http.StatusNotFound)
+		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
 		return
 	}
 
 	var req updateMetadataKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -99,11 +99,11 @@ func (h *MetadataHandler) UpdateMetadataKey(w http.ResponseWriter, r *http.Reque
 		}
 		if err != nil {
 			if err == storage.ErrMetadataKeyNotFound {
-				http.Error(w, "metadata key not found", http.StatusNotFound)
+				httputil.WriteJSONError(w, http.StatusNotFound, "metadata key not found")
 				return
 			}
 			slog.Error("failed to update metadata key active state", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 	}
@@ -112,15 +112,14 @@ func (h *MetadataHandler) UpdateMetadataKey(w http.ResponseWriter, r *http.Reque
 	if req.DisplayName != nil {
 		if err := h.metadata.UpdateMetadataKeyDisplayName(r.Context(), apiKeyID, keyName, req.DisplayName); err != nil {
 			if err == storage.ErrMetadataKeyNotFound {
-				http.Error(w, "metadata key not found", http.StatusNotFound)
+				httputil.WriteJSONError(w, http.StatusNotFound, "metadata key not found")
 				return
 			}
 			slog.Error("failed to update metadata key display name", "error", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

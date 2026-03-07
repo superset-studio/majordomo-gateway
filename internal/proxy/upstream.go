@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const defaultUpstreamTimeout = 120 * time.Second
+
 // hopByHopHeaders are headers that should not be forwarded between client and upstream.
 // These are connection-specific and must be handled at each hop.
 var hopByHopHeaders = map[string]bool{
@@ -29,10 +31,13 @@ type UpstreamClient struct {
 	httpClient *http.Client
 }
 
-func NewUpstreamClient() *UpstreamClient {
+func NewUpstreamClient(timeout time.Duration) *UpstreamClient {
+	if timeout <= 0 {
+		timeout = defaultUpstreamTimeout
+	}
 	return &UpstreamClient{
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},

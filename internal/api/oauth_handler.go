@@ -15,6 +15,7 @@ import (
 
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
+	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
@@ -77,13 +78,13 @@ func (h *OAuthHandler) GitHubLogin(w http.ResponseWriter, r *http.Request) {
 func (h *OAuthHandler) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 	if err := verifyOAuthState(r); err != nil {
 		slog.Warn("OAuth state verification failed", "error", err)
-		http.Error(w, "invalid OAuth state", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid OAuth state")
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		http.Error(w, "missing code parameter", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "missing code parameter")
 		return
 	}
 
@@ -91,7 +92,7 @@ func (h *OAuthHandler) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeGitHubCode(code, h.oauth.GitHub.ClientID, h.oauth.GitHub.ClientSecret, h.baseURL+"/api/v1/admin/auth/github/callback")
 	if err != nil {
 		slog.Error("failed to exchange GitHub code", "error", err)
-		http.Error(w, "failed to authenticate with GitHub", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to authenticate with GitHub")
 		return
 	}
 
@@ -99,7 +100,7 @@ func (h *OAuthHandler) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 	ghUser, err := fetchGitHubUser(tokenResp.AccessToken)
 	if err != nil {
 		slog.Error("failed to fetch GitHub user", "error", err)
-		http.Error(w, "failed to fetch GitHub user info", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to fetch GitHub user info")
 		return
 	}
 
@@ -117,7 +118,7 @@ func (h *OAuthHandler) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Error("failed to find/create OAuth user", "error", err)
-		http.Error(w, "failed to create user account", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to create user account")
 		return
 	}
 
@@ -152,13 +153,13 @@ func (h *OAuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 func (h *OAuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if err := verifyOAuthState(r); err != nil {
 		slog.Warn("OAuth state verification failed", "error", err)
-		http.Error(w, "invalid OAuth state", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid OAuth state")
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		http.Error(w, "missing code parameter", http.StatusBadRequest)
+		httputil.WriteJSONError(w, http.StatusBadRequest, "missing code parameter")
 		return
 	}
 
@@ -166,7 +167,7 @@ func (h *OAuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeGoogleCode(code, h.oauth.Google.ClientID, h.oauth.Google.ClientSecret, h.baseURL+"/api/v1/admin/auth/google/callback")
 	if err != nil {
 		slog.Error("failed to exchange Google code", "error", err)
-		http.Error(w, "failed to authenticate with Google", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to authenticate with Google")
 		return
 	}
 
@@ -174,7 +175,7 @@ func (h *OAuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	gUser, err := fetchGoogleUser(tokenResp.AccessToken)
 	if err != nil {
 		slog.Error("failed to fetch Google user", "error", err)
-		http.Error(w, "failed to fetch Google user info", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to fetch Google user info")
 		return
 	}
 
@@ -191,7 +192,7 @@ func (h *OAuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		slog.Error("failed to find/create OAuth user", "error", err)
-		http.Error(w, "failed to create user account", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to create user account")
 		return
 	}
 
@@ -258,7 +259,7 @@ func (h *OAuthHandler) redirectWithToken(w http.ResponseWriter, r *http.Request,
 	token, err := h.jwt.GenerateToken(user.ID, user.Username)
 	if err != nil {
 		slog.Error("failed to generate JWT for OAuth user", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
