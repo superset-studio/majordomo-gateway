@@ -36,6 +36,9 @@ type UserStorage interface {
 	CreateOAuthUser(ctx context.Context, input *models.CreateOAuthUserInput) (*models.User, error)
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+	UpdateUserS3Config(ctx context.Context, userID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
+	ClearUserS3Config(ctx context.Context, userID uuid.UUID) error
+	GetUserS3Config(ctx context.Context, userID uuid.UUID) (*models.User, error)
 }
 
 // ProxyKeyStorage defines the interface for proxy key CRUD operations

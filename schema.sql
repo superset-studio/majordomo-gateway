@@ -179,3 +179,13 @@ CREATE TABLE IF NOT EXISTS claude_request_details (
 
 CREATE INDEX IF NOT EXISTS idx_claude_request_details_session
     ON claude_request_details(session_id, created_at) WHERE session_id IS NOT NULL;
+
+-- Per-user S3 body storage configuration
+ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_bucket VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_region VARCHAR(50) DEFAULT 'us-east-1';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_endpoint VARCHAR(500);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_access_key_id_encrypted TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_secret_access_key_encrypted TEXT;
+
+-- Optional session name for Claude Code sessions
+ALTER TABLE claude_sessions ADD COLUMN IF NOT EXISTS session_name VARCHAR(255);

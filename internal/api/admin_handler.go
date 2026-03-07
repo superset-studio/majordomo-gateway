@@ -179,6 +179,149 @@ func (h *AdminHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// --- S3 Config ---
+
+type updateS3ConfigRequest struct {
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	Endpoint       string `json:"endpoint"`
+	AccessKeyID    string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey"`
+}
+
+type s3ConfigResponse struct {
+	Bucket         string `json:"bucket"`
+	Region         string `json:"region"`
+	Endpoint       string `json:"endpoint"`
+	CredentialsSet bool   `json:"credentialsSet"`
+}
+
+// GetS3Config handles GET /api/v1/admin/me/s3-config
+func (h *AdminHandler) GetS3Config(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := h.users.GetUserS3Config(r.Context(), claims.UserID)
+	if err != nil {
+		slog.Error("failed to get user S3 config", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := s3ConfigResponse{
+		CredentialsSet: user.S3AccessKeyIDEncrypted != nil && *user.S3AccessKeyIDEncrypted != "",
+	}
+	if user.S3Bucket != nil {
+		resp.Bucket = *user.S3Bucket
+	}
+	if user.S3Region != nil {
+		resp.Region = *user.S3Region
+	}
+	if user.S3Endpoint != nil {
+		resp.Endpoint = *user.S3Endpoint
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// UpdateS3Config handles PUT /api/v1/admin/me/s3-config
+func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req updateS3ConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Bucket == "" {
+		http.Error(w, "bucket is required", http.StatusBadRequest)
+		return
+	}
+	if req.AccessKeyID == "" || req.SecretAccessKey == "" {
+		http.Error(w, "accessKeyId and secretAccessKey are required", http.StatusBadRequest)
+		return
+	}
+
+	if h.secrets == nil {
+		http.Error(w, "encryption not configured", http.StatusInternalServerError)
+		return
+	}
+
+	region := req.Region
+	if region == "" {
+		region = "us-east-1"
+	}
+
+	encAccessKeyID, err := h.secrets.Encrypt(req.AccessKeyID)
+	if err != nil {
+		slog.Error("failed to encrypt S3 access key ID", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	encSecretAccessKey, err := h.secrets.Encrypt(req.SecretAccessKey)
+	if err != nil {
+		slog.Error("failed to encrypt S3 secret access key", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate S3 connectivity before saving
+	if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
+		Bucket:         req.Bucket,
+		Region:         region,
+		Endpoint:       req.Endpoint,
+		AccessKeyID:    req.AccessKeyID,
+		SecretAccessKey: req.SecretAccessKey,
+	}); err != nil {
+		http.Error(w, "S3 validation failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.users.UpdateUserS3Config(r.Context(), claims.UserID, req.Bucket, region, req.Endpoint, encAccessKeyID, encSecretAccessKey); err != nil {
+		slog.Error("failed to update user S3 config", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := s3ConfigResponse{
+		Bucket:         req.Bucket,
+		Region:         region,
+		Endpoint:       req.Endpoint,
+		CredentialsSet: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// DeleteS3Config handles DELETE /api/v1/admin/me/s3-config
+func (h *AdminHandler) DeleteS3Config(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.users.ClearUserS3Config(r.Context(), claims.UserID); err != nil {
+		slog.Error("failed to clear user S3 config", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
 // --- API Keys ---
 
 type adminCreateAPIKeyRequest struct {

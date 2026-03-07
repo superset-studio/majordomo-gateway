@@ -32,14 +32,15 @@ func (m *metadataFlags) Set(value string) error {
 
 // companionProxy holds all state needed to run the proxy.
 type companionProxy struct {
-	gateway    string
-	gatewayURL *url.URL
-	apiKey     string
-	sessionID  string
-	listener   net.Listener
-	server     *http.Server
-	localURL   string
-	metadata   map[string]string
+	gateway     string
+	gatewayURL  *url.URL
+	apiKey      string
+	sessionID   string
+	sessionName string
+	listener    net.Listener
+	server      *http.Server
+	localURL    string
+	metadata    map[string]string
 }
 
 func main() {
@@ -81,15 +82,16 @@ Run 'majordomo-companion <command> --help' for more information.`)
 }
 
 // parseCommonFlags registers and parses flags common to start and exec.
-func parseCommonFlags(fs *flag.FlagSet, args []string) (gateway, apiKey, workdir string, port int, cliMetadata metadataFlags) {
+func parseCommonFlags(fs *flag.FlagSet, args []string) (gateway, apiKey, workdir, sessionName string, port int, cliMetadata metadataFlags) {
 	gatewayFlag := fs.String("gateway", "http://localhost:7680", "gateway URL")
 	apiKeyFlag := fs.String("api-key", "", "Majordomo API key (required)")
 	portFlag := fs.Int("port", 0, "local port to listen on (0 = random)")
 	workdirFlag := fs.String("workdir", "", "directory to read .majordomo/metadata.json from (default: current directory)")
+	sessionNameFlag := fs.String("session-name", "", "optional name for this Claude Code session")
 	fs.Var(&cliMetadata, "metadata", "metadata key=value pair (repeatable)")
 	fs.Parse(args)
 
-	return *gatewayFlag, *apiKeyFlag, *workdirFlag, *portFlag, cliMetadata
+	return *gatewayFlag, *apiKeyFlag, *workdirFlag, *sessionNameFlag, *portFlag, cliMetadata
 }
 
 // buildMetadata merges metadata from .majordomo/metadata.json and CLI flags.
@@ -112,7 +114,7 @@ func buildMetadata(workdir string, cliMetadata metadataFlags) map[string]string 
 
 // startProxy creates a listener, registers a session, and starts the reverse proxy.
 // The proxy server runs in a background goroutine. Call cp.shutdown() to stop it.
-func startProxy(gateway, apiKey string, port int, metadata map[string]string) (*companionProxy, error) {
+func startProxy(gateway, apiKey, sessionName string, port int, metadata map[string]string) (*companionProxy, error) {
 	gatewayURL, err := url.Parse(gateway)
 	if err != nil {
 		return nil, fmt.Errorf("invalid gateway URL: %w", err)
@@ -126,7 +128,7 @@ func startProxy(gateway, apiKey string, port int, metadata map[string]string) (*
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 
-	sessionID, err := registerSession(gateway, apiKey)
+	sessionID, err := registerSession(gateway, apiKey, sessionName)
 	if err != nil {
 		listener.Close()
 		return nil, fmt.Errorf("failed to register session: %w", err)
@@ -142,6 +144,9 @@ func startProxy(gateway, apiKey string, port int, metadata map[string]string) (*
 			req.Header.Set("X-Majordomo-Key", apiKey)
 			req.Header.Set("X-Majordomo-Client", "claude-code")
 			req.Header.Set("X-Majordomo-ClaudeCode-Session-Id", sessionID)
+			if sessionName != "" {
+				req.Header.Set("X-Majordomo-ClaudeCode-Session-Name", sessionName)
+			}
 
 			for key, value := range metadata {
 				req.Header.Set("X-Majordomo-"+key, value)
@@ -156,14 +161,15 @@ func startProxy(gateway, apiKey string, port int, metadata map[string]string) (*
 	}
 
 	cp := &companionProxy{
-		gateway:    gateway,
-		gatewayURL: gatewayURL,
-		apiKey:     apiKey,
-		sessionID:  sessionID,
-		listener:   listener,
-		server:     server,
-		localURL:   localURL,
-		metadata:   metadata,
+		gateway:     gateway,
+		gatewayURL:  gatewayURL,
+		apiKey:      apiKey,
+		sessionID:   sessionID,
+		sessionName: sessionName,
+		listener:    listener,
+		server:      server,
+		localURL:    localURL,
+		metadata:    metadata,
 	}
 
 	// Start serving in background
@@ -190,7 +196,7 @@ func runStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	pidFile := fs.String("pid-file", "", "path to write PID file (required)")
 	envFile := fs.String("env-file", "", "path to write ANTHROPIC_BASE_URL export")
-	gateway, apiKey, workdir, port, cliMeta := parseCommonFlags(fs, args)
+	gateway, apiKey, workdir, sessionName, port, cliMeta := parseCommonFlags(fs, args)
 
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "error: --api-key is required")
@@ -207,7 +213,7 @@ func runStart(args []string) {
 
 	metadata := buildMetadata(workdir, cliMeta)
 
-	cp, err := startProxy(gateway, apiKey, port, metadata)
+	cp, err := startProxy(gateway, apiKey, sessionName, port, metadata)
 	if err != nil {
 		slog.Error("failed to start proxy", "error", err)
 		os.Exit(1)
@@ -243,7 +249,7 @@ func runStart(args []string) {
 
 func runExec(args []string) {
 	fs := flag.NewFlagSet("exec", flag.ExitOnError)
-	gateway, apiKey, workdir, port, cliMeta := parseCommonFlags(fs, args)
+	gateway, apiKey, workdir, sessionName, port, cliMeta := parseCommonFlags(fs, args)
 
 	// Everything after flag parsing is the command to run
 	cmdArgs := fs.Args()
@@ -264,7 +270,7 @@ func runExec(args []string) {
 
 	metadata := buildMetadata(workdir, cliMeta)
 
-	cp, err := startProxy(gateway, apiKey, port, metadata)
+	cp, err := startProxy(gateway, apiKey, sessionName, port, metadata)
 	if err != nil {
 		slog.Error("failed to start proxy", "error", err)
 		os.Exit(1)
@@ -381,12 +387,21 @@ type sessionResponse struct {
 	ID string `json:"id"`
 }
 
-func registerSession(gateway, apiKey string) (string, error) {
-	req, err := http.NewRequest("POST", gateway+"/api/v1/claude-sessions", nil)
+func registerSession(gateway, apiKey, sessionName string) (string, error) {
+	var body io.Reader
+	if sessionName != "" {
+		jsonBody, _ := json.Marshal(map[string]string{"name": sessionName})
+		body = bytes.NewReader(jsonBody)
+	}
+
+	req, err := http.NewRequest("POST", gateway+"/api/v1/claude-sessions", body)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("X-Majordomo-Key", apiKey)
+	if sessionName != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -394,13 +409,13 @@ func registerSession(gateway, apiKey string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var session sessionResponse
-	if err := json.Unmarshal(body, &session); err != nil {
+	if err := json.Unmarshal(respBody, &session); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 

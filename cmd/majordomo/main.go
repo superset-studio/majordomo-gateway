@@ -127,7 +127,16 @@ func runServe(args []string) {
 	sessionMgr := claudecode.NewSessionManager(store)
 	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	// Set up per-user S3 body storage
+	userS3Storage := storage.NewUserS3Storage()
+
+	// Determine secret store and user store for proxy handler
+	var proxySecretStore secrets.SecretStore
+	if cfg.Secrets.EncryptionKey != "" {
+		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
+	}
+
+	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig

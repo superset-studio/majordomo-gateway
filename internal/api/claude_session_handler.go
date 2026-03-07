@@ -26,6 +26,10 @@ func NewClaudeSessionHandler(mgr *claudecode.SessionManager, store storage.Claud
 	}
 }
 
+type startSessionRequest struct {
+	Name string `json:"name"`
+}
+
 // StartSession handles POST /api/v1/claude-sessions
 func (h *ClaudeSessionHandler) StartSession(w http.ResponseWriter, r *http.Request) {
 	info := GetAPIKeyInfo(r.Context())
@@ -34,7 +38,15 @@ func (h *ClaudeSessionHandler) StartSession(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	session, err := h.sessionMgr.StartSession(r.Context(), info.ID)
+	var sessionName *string
+	var req startSessionRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Name != "" {
+			sessionName = &req.Name
+		}
+	}
+
+	session, err := h.sessionMgr.StartSession(r.Context(), info.ID, sessionName)
 	if err != nil {
 		slog.Error("failed to start claude session", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

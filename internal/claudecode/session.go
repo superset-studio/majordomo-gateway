@@ -19,11 +19,12 @@ func NewSessionManager(store storage.ClaudeSessionStorage) *SessionManager {
 	return &SessionManager{store: store}
 }
 
-// StartSession creates a new Claude Code session.
-func (m *SessionManager) StartSession(ctx context.Context, apiKeyID uuid.UUID) (*models.ClaudeSession, error) {
+// StartSession creates a new Claude Code session with an optional name.
+func (m *SessionManager) StartSession(ctx context.Context, apiKeyID uuid.UUID, sessionName *string) (*models.ClaudeSession, error) {
 	session := &models.ClaudeSession{
 		ID:                uuid.New(),
 		MajordomoAPIKeyID: apiKeyID,
+		SessionName:       sessionName,
 		StartedAt:         time.Now(),
 	}
 

@@ -16,6 +16,22 @@ type User struct {
 	AuthProviderID *string   `json:"-" db:"auth_provider_id"`
 	IsActive       bool      `json:"is_active" db:"is_active"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+
+	// Per-user S3 body storage configuration
+	S3Bucket                   *string `json:"s3_bucket,omitempty" db:"s3_bucket"`
+	S3Region                   *string `json:"s3_region,omitempty" db:"s3_region"`
+	S3Endpoint                 *string `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
+	S3AccessKeyIDEncrypted     *string `json:"-" db:"s3_access_key_id_encrypted"`
+	S3SecretAccessKeyEncrypted *string `json:"-" db:"s3_secret_access_key_encrypted"`
+}
+
+// UserS3Config holds decrypted S3 configuration for per-user body storage.
+type UserS3Config struct {
+	Bucket         string
+	Region         string
+	Endpoint       string
+	AccessKeyID    string
+	SecretAccessKey string
 }
 
 // CreateUserInput contains fields for creating a new user

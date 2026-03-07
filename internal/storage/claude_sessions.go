@@ -15,18 +15,18 @@ var (
 	ErrClaudeRequestDetailNotFound = errors.New("claude request detail not found")
 )
 
-const claudeSessionColumns = `id, majordomo_api_key_id, started_at, ended_at, total_requests, total_input_tokens, total_output_tokens, total_cost, created_at`
+const claudeSessionColumns = `id, majordomo_api_key_id, session_name, started_at, ended_at, total_requests, total_input_tokens, total_output_tokens, total_cost, created_at`
 
 const claudeRequestDetailColumns = `id, llm_request_id, session_id, message_count, user_message_count, assistant_message_count, tool_names, tool_use_count, has_thinking, is_plan_mode, stop_reason, system_prompt_hash, created_at`
 
 func (s *PostgresStorage) CreateClaudeSession(ctx context.Context, session *models.ClaudeSession) error {
 	query := `
-		INSERT INTO claude_sessions (id, majordomo_api_key_id, started_at)
-		VALUES ($1, $2, $3)
+		INSERT INTO claude_sessions (id, majordomo_api_key_id, session_name, started_at)
+		VALUES ($1, $2, $3, $4)
 		RETURNING ` + claudeSessionColumns
 
 	return s.db.QueryRowxContext(ctx, query,
-		session.ID, session.MajordomoAPIKeyID, session.StartedAt,
+		session.ID, session.MajordomoAPIKeyID, session.SessionName, session.StartedAt,
 	).StructScan(session)
 }
 

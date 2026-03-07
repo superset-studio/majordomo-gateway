@@ -11,6 +11,7 @@ import (
 type ClaudeSession struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	MajordomoAPIKeyID uuid.UUID  `json:"majordomoApiKeyId" db:"majordomo_api_key_id"`
+	SessionName       *string    `json:"sessionName,omitempty" db:"session_name"`
 	StartedAt         time.Time  `json:"startedAt" db:"started_at"`
 	EndedAt           *time.Time `json:"endedAt,omitempty" db:"ended_at"`
 	TotalRequests     int        `json:"totalRequests" db:"total_requests"`
@@ -92,6 +93,7 @@ type ClaudeSessionListItem struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	MajordomoAPIKeyID uuid.UUID  `json:"majordomoApiKeyId" db:"majordomo_api_key_id"`
 	APIKeyName        string     `json:"apiKeyName" db:"api_key_name"`
+	SessionName       *string    `json:"sessionName,omitempty" db:"session_name"`
 	StartedAt         time.Time  `json:"startedAt" db:"started_at"`
 	EndedAt           *time.Time `json:"endedAt,omitempty" db:"ended_at"`
 	DurationMinutes   *float64   `json:"durationMinutes,omitempty" db:"duration_minutes"`

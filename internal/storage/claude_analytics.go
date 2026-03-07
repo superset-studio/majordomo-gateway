@@ -164,6 +164,7 @@ func (s *PostgresStorage) ListClaudeSessionsAdmin(ctx context.Context, filter *U
 			cs.id,
 			cs.majordomo_api_key_id,
 			ak.name AS api_key_name,
+			cs.session_name,
 			cs.started_at,
 			cs.ended_at,
 			EXTRACT(EPOCH FROM (cs.ended_at - cs.started_at)) / 60.0 AS duration_minutes,
