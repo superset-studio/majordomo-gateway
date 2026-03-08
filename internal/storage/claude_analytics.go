@@ -12,8 +12,17 @@ import (
 
 // claudeBaseWhere builds the common WHERE clause and args for Claude analytics queries.
 func claudeBaseWhere(filter *UsageFilter) (string, []interface{}) {
-	args := []interface{}{filter.UserID, filter.Start, filter.End}
-	where := `ak.user_id = $1 AND cs.started_at >= $2 AND cs.started_at < $3`
+	var ownerClause string
+	var ownerArg interface{}
+	if filter.OrgID != nil {
+		ownerClause = `ak.org_id = $1`
+		ownerArg = *filter.OrgID
+	} else {
+		ownerClause = `ak.user_id = $1`
+		ownerArg = filter.UserID
+	}
+	args := []interface{}{ownerArg, filter.Start, filter.End}
+	where := ownerClause + ` AND cs.started_at >= $2 AND cs.started_at < $3`
 	if filter.APIKeyID != nil {
 		args = append(args, *filter.APIKeyID)
 		where += fmt.Sprintf(` AND cs.majordomo_api_key_id = $%d`, len(args))
@@ -251,16 +260,30 @@ func (s *PostgresStorage) GetClaudePerformance(ctx context.Context, filter *Usag
 	return &perf, nil
 }
 
-func (s *PostgresStorage) GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID) (*models.ClaudeSessionDetail, error) {
+func (s *PostgresStorage) GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.ClaudeSessionDetail, error) {
 	// Fetch session with ownership check
-	sessionQuery := `
+	var sessionQuery string
+	if orgID != nil {
+		sessionQuery = `
+		SELECT cs.id, cs.majordomo_api_key_id, cs.started_at, cs.ended_at, cs.total_requests, cs.total_input_tokens, cs.total_output_tokens, cs.total_cost, cs.created_at
+		FROM claude_sessions cs
+		JOIN api_keys ak ON ak.id = cs.majordomo_api_key_id
+		WHERE cs.id = $1 AND ak.org_id = $2`
+	} else {
+		sessionQuery = `
 		SELECT cs.id, cs.majordomo_api_key_id, cs.started_at, cs.ended_at, cs.total_requests, cs.total_input_tokens, cs.total_output_tokens, cs.total_cost, cs.created_at
 		FROM claude_sessions cs
 		JOIN api_keys ak ON ak.id = cs.majordomo_api_key_id
 		WHERE cs.id = $1 AND ak.user_id = $2`
+	}
+
+	ownerArg := interface{}(userID)
+	if orgID != nil {
+		ownerArg = *orgID
+	}
 
 	var session models.ClaudeSession
-	if err := s.db.GetContext(ctx, &session, sessionQuery, sessionID, userID); err != nil {
+	if err := s.db.GetContext(ctx, &session, sessionQuery, sessionID, ownerArg); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrClaudeSessionNotFound
 		}

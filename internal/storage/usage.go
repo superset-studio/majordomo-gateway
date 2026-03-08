@@ -9,12 +9,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 )
 
 var ErrRequestNotFound = errors.New("request not found")
 
 const requestListItemColumns = `id, majordomo_api_key_id, provider, model, requested_at, response_time_ms, input_tokens, output_tokens, total_cost, status_code, error_message`
+
+// ownershipClause returns the SQL clause and argument for scoping queries
+// by either org_id (if OrgID is set) or user_id.
+func ownershipClause(filter *UsageFilter) (string, interface{}) {
+	if filter.OrgID != nil {
+		return "org_id = $1", *filter.OrgID
+	}
+	return "user_id = $1", filter.UserID
+}
 
 // appendMetadataFilters appends AND indexed_metadata->>$N = $M clauses for each metadata filter.
 func appendMetadataFilters(query string, args []interface{}, filters []MetadataFilter) (string, []interface{}) {
@@ -33,9 +43,11 @@ func (s *PostgresStorage) GetUsageSummary(ctx context.Context, filter *UsageFilt
 			COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
 			COALESCE(SUM(total_cost), 0) AS total_cost
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3`
+		WHERE %s AND requested_at >= $2 AND requested_at < $3`
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End}
+	clause, ownerArg := ownershipClause(filter)
+	query = fmt.Sprintf(query, clause)
+	args := []interface{}{ownerArg, filter.Start, filter.End}
 	query, args = appendMetadataFilters(query, args, filter.MetadataFilters)
 
 	var summary struct {
@@ -65,10 +77,12 @@ func (s *PostgresStorage) GetDailyUsage(ctx context.Context, filter *UsageFilter
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(total_cost), 0) AS total_cost
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3
+		WHERE %s AND requested_at >= $2 AND requested_at < $3
 			AND ($4::uuid IS NULL OR majordomo_api_key_id = $4)`
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End, filter.APIKeyID}
+	clause, ownerArg := ownershipClause(filter)
+	query = fmt.Sprintf(query, clause)
+	args := []interface{}{ownerArg, filter.Start, filter.End, filter.APIKeyID}
 	query, args = appendMetadataFilters(query, args, filter.MetadataFilters)
 	query += `
 		GROUP BY DATE_TRUNC('day', requested_at)
@@ -110,10 +124,12 @@ func (s *PostgresStorage) GetModelBreakdown(ctx context.Context, filter *UsageFi
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(total_cost), 0) AS total_cost
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3
+		WHERE %s AND requested_at >= $2 AND requested_at < $3
 			AND ($4::uuid IS NULL OR majordomo_api_key_id = $4)`
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End, filter.APIKeyID}
+	clause, ownerArg := ownershipClause(filter)
+	query = fmt.Sprintf(query, clause)
+	args := []interface{}{ownerArg, filter.Start, filter.End, filter.APIKeyID}
 	query, args = appendMetadataFilters(query, args, filter.MetadataFilters)
 	query += `
 		GROUP BY provider, model
@@ -158,9 +174,11 @@ func (s *PostgresStorage) GetAPIKeyBreakdown(ctx context.Context, filter *UsageF
 			COALESCE(SUM(lr.total_cost), 0) AS total_cost
 		FROM llm_requests lr
 		JOIN api_keys ak ON ak.id = lr.majordomo_api_key_id
-		WHERE lr.user_id = $1 AND lr.requested_at >= $2 AND lr.requested_at < $3`
+		WHERE lr.%s AND lr.requested_at >= $2 AND lr.requested_at < $3`
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End}
+	clause, ownerArg := ownershipClause(filter)
+	query = fmt.Sprintf(query, clause)
+	args := []interface{}{ownerArg, filter.Start, filter.End}
 	// Metadata filters use non-aliased column since it's on llm_requests
 	for _, f := range filter.MetadataFilters {
 		query += fmt.Sprintf(` AND lr.indexed_metadata->>$%d = $%d`, len(args)+1, len(args)+2)
@@ -202,10 +220,12 @@ func (s *PostgresStorage) ListUsageRequests(ctx context.Context, filter *UsageFi
 	countQuery := `
 		SELECT COUNT(*)
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3
+		WHERE %s AND requested_at >= $2 AND requested_at < $3
 			AND ($4::uuid IS NULL OR majordomo_api_key_id = $4)`
 
-	countArgs := []interface{}{filter.UserID, filter.Start, filter.End, filter.APIKeyID}
+	clause, ownerArg := ownershipClause(filter)
+	countQuery = fmt.Sprintf(countQuery, clause)
+	countArgs := []interface{}{ownerArg, filter.Start, filter.End, filter.APIKeyID}
 	countQuery, countArgs = appendMetadataFilters(countQuery, countArgs, filter.MetadataFilters)
 
 	var total int
@@ -213,13 +233,13 @@ func (s *PostgresStorage) ListUsageRequests(ctx context.Context, filter *UsageFi
 		return nil, 0, err
 	}
 
-	query := `
-		SELECT ` + requestListItemColumns + `
+	query := fmt.Sprintf(`
+		SELECT `+requestListItemColumns+`
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3
-			AND ($4::uuid IS NULL OR majordomo_api_key_id = $4)`
+		WHERE %s AND requested_at >= $2 AND requested_at < $3
+			AND ($4::uuid IS NULL OR majordomo_api_key_id = $4)`, clause)
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End, filter.APIKeyID}
+	args := []interface{}{ownerArg, filter.Start, filter.End, filter.APIKeyID}
 	query, args = appendMetadataFilters(query, args, filter.MetadataFilters)
 	query += fmt.Sprintf(`
 		ORDER BY requested_at DESC
@@ -242,11 +262,13 @@ func (s *PostgresStorage) GetMetadataBreakdown(ctx context.Context, filter *Usag
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(total_cost), 0) AS total_cost
 		FROM llm_requests
-		WHERE user_id = $1 AND requested_at >= $2 AND requested_at < $3
+		WHERE %s AND requested_at >= $2 AND requested_at < $3
 			AND ($5::uuid IS NULL OR majordomo_api_key_id = $5)
 			AND indexed_metadata ? $4`
 
-	args := []interface{}{filter.UserID, filter.Start, filter.End, keyName, filter.APIKeyID}
+	clause, ownerArg := ownershipClause(filter)
+	query = fmt.Sprintf(query, clause)
+	args := []interface{}{ownerArg, filter.Start, filter.End, keyName, filter.APIKeyID}
 	query, args = appendMetadataFilters(query, args, filter.MetadataFilters)
 	query += fmt.Sprintf(`
 		GROUP BY indexed_metadata->>$4
@@ -286,10 +308,16 @@ const requestLogColumns = `id, user_id, majordomo_api_key_id, proxy_key_id, prov
 	status_code, error_message, raw_metadata, indexed_metadata,
 	request_body, response_body, body_s3_key, model_alias_found, created_at`
 
-func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID) (*models.RequestLog, error) {
-	query := `SELECT ` + requestLogColumns + ` FROM llm_requests WHERE id = $1 AND user_id = $2`
-
-	sqlRow := s.db.QueryRowxContext(ctx, query, requestID, userID)
+func (s *PostgresStorage) GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.RequestLog, error) {
+	var query string
+	var sqlRow *sqlx.Row
+	if orgID != nil {
+		query = `SELECT ` + requestLogColumns + ` FROM llm_requests WHERE id = $1 AND org_id = $2`
+		sqlRow = s.db.QueryRowxContext(ctx, query, requestID, *orgID)
+	} else {
+		query = `SELECT ` + requestLogColumns + ` FROM llm_requests WHERE id = $1 AND user_id = $2`
+		sqlRow = s.db.QueryRowxContext(ctx, query, requestID, userID)
+	}
 
 	var (
 		id                  uuid.UUID

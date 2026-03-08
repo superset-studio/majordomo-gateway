@@ -55,6 +55,7 @@ type APIKey struct {
 	Name         string     `json:"name" db:"name"`
 	Description  *string    `json:"description,omitempty" db:"description"`
 	UserID       *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
+	OrgID        *uuid.UUID `json:"org_id,omitempty" db:"org_id"`
 	IsActive     bool       `json:"is_active" db:"is_active"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	RevokedAt    *time.Time `json:"revoked_at,omitempty" db:"revoked_at"`
@@ -67,6 +68,7 @@ type CreateAPIKeyInput struct {
 	Name        string
 	Description *string
 	UserID      *uuid.UUID
+	OrgID       *uuid.UUID
 }
 
 // UpdateAPIKeyInput contains fields for updating an API key
@@ -81,6 +83,7 @@ type APIKeyInfo struct {
 	Hash   string     // SHA256 hash of the key
 	Alias  *string    // Optional alias (key name)
 	UserID *uuid.UUID // Owning user (if key belongs to a user)
+	OrgID  *uuid.UUID // Owning organization (if key belongs to an org)
 }
 
 type UsageMetrics struct {
@@ -139,6 +142,9 @@ type RequestLog struct {
 	// User who owns the API key
 	UserID *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
 
+	// Organization that owns the API key
+	OrgID *uuid.UUID `json:"org_id,omitempty" db:"org_id"`
+
 	// Proxy key (if request used a proxy key)
 	ProxyKeyID *uuid.UUID `json:"proxy_key_id,omitempty" db:"proxy_key_id"`
 
@@ -194,4 +200,58 @@ type ClaudeRequestMetadata struct {
 	IsPlanMode            bool
 	StopReason            string
 	SystemPromptHash      string
+}
+
+// Organization represents a team/organization for shared API key and reporting management.
+type Organization struct {
+	ID                         uuid.UUID `json:"id" db:"id"`
+	Name                       string    `json:"name" db:"name"`
+	Slug                       string    `json:"slug" db:"slug"`
+	S3Bucket                   *string   `json:"s3_bucket,omitempty" db:"s3_bucket"`
+	S3Region                   *string   `json:"s3_region,omitempty" db:"s3_region"`
+	S3Endpoint                 *string   `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
+	S3AccessKeyIDEncrypted     *string   `json:"-" db:"s3_access_key_id_encrypted"`
+	S3SecretAccessKeyEncrypted *string   `json:"-" db:"s3_secret_access_key_encrypted"`
+	CreatedAt                  time.Time `json:"created_at" db:"created_at"`
+}
+
+// OrganizationMember represents a user's membership in an organization.
+type OrganizationMember struct {
+	OrgID     uuid.UUID `json:"org_id" db:"org_id"`
+	UserID    uuid.UUID `json:"user_id" db:"user_id"`
+	Role      string    `json:"role" db:"role"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	Username  string    `json:"username,omitempty" db:"username"`
+	Email     *string   `json:"email,omitempty" db:"email"`
+}
+
+// OrganizationInvite represents a pending invitation to join an organization.
+type OrganizationInvite struct {
+	ID         uuid.UUID  `json:"id" db:"id"`
+	OrgID      uuid.UUID  `json:"org_id" db:"org_id"`
+	Email      string     `json:"email" db:"email"`
+	Role       string     `json:"role" db:"role"`
+	Token      string     `json:"-" db:"token"`
+	InvitedBy  uuid.UUID  `json:"invited_by" db:"invited_by"`
+	ExpiresAt  time.Time  `json:"expires_at" db:"expires_at"`
+	AcceptedAt *time.Time `json:"accepted_at,omitempty" db:"accepted_at"`
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
+}
+
+// CreateOrganizationInput contains fields for creating a new organization.
+type CreateOrganizationInput struct {
+	Name string
+	Slug string
+}
+
+// UpdateOrganizationInput contains fields for updating an organization.
+type UpdateOrganizationInput struct {
+	Name *string
+	Slug *string
+}
+
+// CreateInviteInput contains fields for creating an organization invite.
+type CreateInviteInput struct {
+	Email string
+	Role  string
 }

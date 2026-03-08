@@ -11,6 +11,7 @@ import (
 type ClaudeSession struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	MajordomoAPIKeyID uuid.UUID  `json:"majordomoApiKeyId" db:"majordomo_api_key_id"`
+	OrgID             *uuid.UUID `json:"orgId,omitempty" db:"org_id"`
 	SessionName       *string    `json:"sessionName,omitempty" db:"session_name"`
 	StartedAt         time.Time  `json:"startedAt" db:"started_at"`
 	EndedAt           *time.Time `json:"endedAt,omitempty" db:"ended_at"`

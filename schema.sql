@@ -189,3 +189,53 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_secret_access_key_encrypted TEXT;
 
 -- Optional session name for Claude Code sessions
 ALTER TABLE claude_sessions ADD COLUMN IF NOT EXISTS session_name VARCHAR(255);
+
+-- Organizations
+CREATE TABLE IF NOT EXISTS organizations (
+    id                              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                            VARCHAR(255) NOT NULL,
+    slug                            VARCHAR(255) NOT NULL UNIQUE,
+    s3_bucket                       VARCHAR(255),
+    s3_region                       VARCHAR(50) DEFAULT 'us-east-1',
+    s3_endpoint                     VARCHAR(500),
+    s3_access_key_id_encrypted      TEXT,
+    s3_secret_access_key_encrypted  TEXT,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Organization Members
+CREATE TABLE IF NOT EXISTS organization_members (
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role        VARCHAR(50) NOT NULL DEFAULT 'member',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id);
+
+-- Organization Invites
+CREATE TABLE IF NOT EXISTS organization_invites (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    email       VARCHAR(255) NOT NULL,
+    role        VARCHAR(50) NOT NULL DEFAULT 'member',
+    token       VARCHAR(255) NOT NULL UNIQUE,
+    invited_by  UUID NOT NULL REFERENCES users(id),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    accepted_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(org_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_org_invites_token ON organization_invites(token);
+CREATE INDEX IF NOT EXISTS idx_org_invites_email ON organization_invites(email);
+
+-- Organization ownership on API keys
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_org_id ON api_keys(org_id) WHERE org_id IS NOT NULL;
+
+-- Denormalized org_id on llm_requests for efficient per-org queries
+ALTER TABLE llm_requests ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(id);
+CREATE INDEX IF NOT EXISTS idx_llm_requests_org_id_time ON llm_requests(org_id, requested_at DESC) WHERE org_id IS NOT NULL;
+
+-- Denormalized org_id on claude_sessions
+ALTER TABLE claude_sessions ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(id);

@@ -136,7 +136,7 @@ func runServe(args []string) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig
@@ -155,12 +155,18 @@ func runServe(args []string) {
 			}
 		}
 
-		adminHandler := api.NewAdminHandler(store, store, store, adminSecretStore, jwtSvc)
+		adminHandler := api.NewAdminHandler(store, store, store, store, adminSecretStore, jwtSvc)
 		usageHandler = api.NewUsageHandler(store, store)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
+		var orgHandler *api.OrgHandler
+		if adminSecretStore != nil {
+			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc)
+		}
+
 		adminCfg = &server.AdminConfig{
 			AdminHandler: adminHandler,
+			OrgHandler:   orgHandler,
 			JWTService:   jwtSvc,
 			CORSOrigins:  cfg.CORS.AllowedOrigins,
 		}
@@ -171,7 +177,7 @@ func runServe(args []string) {
 			if gatewayBaseURL == "" {
 				gatewayBaseURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
 			}
-			oauthHandler := api.NewOAuthHandler(store, jwtSvc, cfg.OAuth, gatewayBaseURL)
+			oauthHandler := api.NewOAuthHandler(store, store, jwtSvc, cfg.OAuth, gatewayBaseURL)
 			adminCfg.OAuthHandler = oauthHandler
 			slog.Info("OAuth authentication enabled",
 				"github", cfg.OAuth.GitHub.ClientID != "",
