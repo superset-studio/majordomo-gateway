@@ -41,7 +41,8 @@ func ValidateGCSConfig(ctx context.Context, cfg *models.UserGCSConfig) error {
 
 // UserGCSStorage manages per-user GCS clients for uploading request/response bodies.
 type UserGCSStorage struct {
-	clients sync.Map // userID (string) → *userGCSClient
+	mu      sync.Mutex
+	clients map[string]*userGCSClient
 }
 
 type userGCSClient struct {
@@ -52,7 +53,7 @@ type userGCSClient struct {
 
 // NewUserGCSStorage creates a new UserGCSStorage.
 func NewUserGCSStorage() *UserGCSStorage {
-	return &UserGCSStorage{}
+	return &UserGCSStorage{clients: make(map[string]*userGCSClient)}
 }
 
 // GenerateUserGCSClaudeCodeKey creates a GCS key for Claude Code request/response bodies.
@@ -122,7 +123,8 @@ func (u *UserGCSStorage) doUpload(userID uuid.UUID, cfg *models.UserGCSConfig, u
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	wc := client.client.Bucket(client.bucket).Object(upload.Key).NewWriter(ctx)
 	wc.ContentType = "application/json"
 	wc.ContentEncoding = "gzip"
@@ -145,13 +147,16 @@ func (u *UserGCSStorage) getOrCreateClient(userID uuid.UUID, cfg *models.UserGCS
 	hash := fmt.Sprintf("%x", sha256.Sum256(append([]byte(cfg.Bucket+"|"), cfg.CredentialsJSON...)))
 
 	key := userID.String()
-	if existing, ok := u.clients.Load(key); ok {
-		client := existing.(*userGCSClient)
-		if client.configHash == hash {
-			return client, nil
+
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	if existing, ok := u.clients[key]; ok {
+		if existing.configHash == hash {
+			return existing, nil
 		}
 		// Config changed — close the stale client before replacing it.
-		_ = client.client.Close()
+		_ = existing.client.Close()
 	}
 
 	var opts []option.ClientOption
@@ -170,6 +175,6 @@ func (u *UserGCSStorage) getOrCreateClient(userID uuid.UUID, cfg *models.UserGCS
 		configHash: hash,
 	}
 
-	u.clients.Store(key, client)
+	u.clients[key] = client
 	return client, nil
 }

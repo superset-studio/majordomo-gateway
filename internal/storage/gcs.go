@@ -30,6 +30,10 @@ type GCSBodyStorage struct {
 }
 
 func NewGCSBodyStorage(ctx context.Context, cfg GCSBodyStorageConfig) (*GCSBodyStorage, error) {
+	if cfg.Bucket == "" {
+		return nil, fmt.Errorf("GCS bucket name is required")
+	}
+
 	var opts []option.ClientOption
 
 	if cfg.CredentialsJSON != "" {
@@ -73,7 +77,8 @@ func (s *GCSBodyStorage) uploadLoop() {
 }
 
 func (s *GCSBodyStorage) doUpload(upload *BodyUpload) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	content := S3BodyContent{
 		RequestID: upload.RequestID.String(),
