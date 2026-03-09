@@ -76,6 +76,8 @@ func GenerateUserGCSRequestKey(apiKeyName string, requestID uuid.UUID, timestamp
 }
 
 // Upload uploads a body to the user's GCS bucket asynchronously (fire-and-forget).
+// ctx is intentionally not forwarded to the goroutine — the upload must complete
+// even after the request context is cancelled.
 func (u *UserGCSStorage) Upload(ctx context.Context, userID uuid.UUID, cfg *models.UserGCSConfig, upload *BodyUpload) {
 	go u.doUpload(userID, cfg, upload)
 }
@@ -148,6 +150,8 @@ func (u *UserGCSStorage) getOrCreateClient(userID uuid.UUID, cfg *models.UserGCS
 		if client.configHash == hash {
 			return client, nil
 		}
+		// Config changed — close the stale client before replacing it.
+		_ = client.client.Close()
 	}
 
 	var opts []option.ClientOption

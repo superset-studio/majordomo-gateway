@@ -179,7 +179,7 @@ func (s *PostgresStorage) GetUserS3Config(ctx context.Context, userID uuid.UUID)
 func (s *PostgresStorage) UpdateUserGCSConfig(ctx context.Context, userID uuid.UUID, bucket, encCredentialsJSON string) error {
 	query := `
 		UPDATE users
-		SET gcs_bucket = $1, gcs_credentials_json_encrypted = $2
+		SET gcs_bucket = $1, gcs_credentials_json_encrypted = NULLIF($2, '')
 		WHERE id = $3`
 
 	result, err := s.db.ExecContext(ctx, query, bucket, encCredentialsJSON, userID)

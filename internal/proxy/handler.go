@@ -29,7 +29,7 @@ type Handler struct {
 	gcsStorage      *storage.GCSBodyStorage
 	userGCSStorage  *storage.UserGCSStorage
 	userStore       storage.UserStorage
-	orgStore       storage.OrganizationStorage
+	orgStore        storage.OrganizationStorage
 	secretStore     secrets.SecretStore
 	pricing         *pricing.Service
 	resolver        *auth.Resolver
@@ -38,7 +38,7 @@ type Handler struct {
 	config          *config.Config
 	providers       map[provider.Provider]string
 	userS3Cache     sync.Map // userID (string) → *cachedUserS3Config
-	orgS3Cache     sync.Map // orgID (string) → *cachedUserS3Config
+	orgS3Cache      sync.Map // orgID (string) → *cachedUserS3Config
 	userS3CacheTTL  time.Duration
 	userGCSCache    sync.Map // userID (string) → *cachedUserGCSConfig
 	userGCSCacheTTL time.Duration
@@ -89,7 +89,7 @@ func NewHandler(
 		gcsStorage:      gcsStorage,
 		userGCSStorage:  userGCSStorage,
 		userStore:       userStore,
-		orgStore:       orgStore,
+		orgStore:        orgStore,
 		secretStore:     secretStore,
 		pricing:         pricingSvc,
 		resolver:        resolver,

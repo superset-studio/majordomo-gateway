@@ -35,6 +35,7 @@ gcs:
   bucket: ""
   credentials_file: ""  # Path to service account JSON file (optional)
   credentials_json: ""  # Inline service account JSON (optional); both empty = Application Default Credentials
+                        # In containers, prefer: MAJORDOMO_GCS_CREDENTIALS_JSON='{"type":"service_account",...}'
 
 pricing:
   remote_url: "https://www.llm-prices.com/current-v1.json"

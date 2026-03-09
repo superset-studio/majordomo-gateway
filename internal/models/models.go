@@ -187,7 +187,7 @@ type RequestLog struct {
 	IndexedMetadata map[string]string `json:"indexed_metadata,omitempty" db:"indexed_metadata"`
 	RequestBody     *string           `json:"request_body,omitempty" db:"request_body"`
 	ResponseBody    *string           `json:"response_body,omitempty" db:"response_body"`
-	BodyS3Key       *string           `json:"body_s3_key,omitempty" db:"body_s3_key"`
+	BodyS3Key       *string           `json:"body_s3_key,omitempty" db:"body_s3_key"` // reused for GCS keys to avoid an llm_requests migration
 	ModelAliasFound bool              `json:"model_alias_found" db:"model_alias_found"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`

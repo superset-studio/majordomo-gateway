@@ -397,17 +397,22 @@ func (h *AdminHandler) UpdateGCSConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-user GCS requires explicit credentials — ADC is not supported here
+	// because it would validate against the server's identity, not the user's.
+	if req.CredentialsJSON == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "credentialsJSON is required")
+		return
+	}
+
 	if h.secrets == nil {
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
 		return
 	}
 
-	// Validate that credentialsJSON is valid JSON if provided
-	if req.CredentialsJSON != "" {
-		if !json.Valid([]byte(req.CredentialsJSON)) {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "credentialsJSON must be valid JSON")
-			return
-		}
+	// Validate that credentialsJSON is valid JSON
+	if !json.Valid([]byte(req.CredentialsJSON)) {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "credentialsJSON must be valid JSON")
+		return
 	}
 
 	// Validate GCS connectivity before saving
