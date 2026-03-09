@@ -20,6 +20,7 @@ type AdminHandler struct {
 	apiKeys     storage.APIKeyStorage
 	proxyKeys   storage.ProxyKeyStorage
 	users       storage.UserStorage
+	orgs        storage.OrganizationStorage
 	secrets     secrets.SecretStore
 	jwt         *auth.JWTService
 	proxyKeySvc *ProxyKeyService
@@ -30,6 +31,7 @@ func NewAdminHandler(
 	apiKeys storage.APIKeyStorage,
 	proxyKeys storage.ProxyKeyStorage,
 	users storage.UserStorage,
+	orgs storage.OrganizationStorage,
 	secretStore secrets.SecretStore,
 	jwtSvc *auth.JWTService,
 ) *AdminHandler {
@@ -37,6 +39,7 @@ func NewAdminHandler(
 		apiKeys:     apiKeys,
 		proxyKeys:   proxyKeys,
 		users:       users,
+		orgs:        orgs,
 		secrets:     secretStore,
 		jwt:         jwtSvc,
 		proxyKeySvc: NewProxyKeyService(proxyKeys, secretStore),
@@ -51,8 +54,9 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token string       `json:"token"`
-	User  *models.User `json:"user"`
+	Token string              `json:"token"`
+	User  *models.User        `json:"user"`
+	Org   *models.Organization `json:"org,omitempty"`
 }
 
 // Login handles POST /api/v1/admin/login
@@ -90,14 +94,32 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.jwt.GenerateToken(user.ID, user.Username)
+	// Resolve org membership for JWT
+	var orgID *uuid.UUID
+	var orgRole *string
+	var org *models.Organization
+	if h.orgs != nil {
+		o, member, err := h.orgs.GetUserOrganization(r.Context(), user.ID)
+		if err != nil {
+			slog.Error("failed to get user organization", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if o != nil {
+			orgID = &o.ID
+			orgRole = &member.Role
+			org = o
+		}
+	}
+
+	token, err := h.jwt.GenerateToken(user.ID, user.Username, orgID, orgRole)
 	if err != nil {
 		slog.Error("failed to generate token", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, loginResponse{Token: token, User: user})
+	httputil.WriteJSON(w, http.StatusOK, loginResponse{Token: token, User: user, Org: org})
 }
 
 // --- Me ---
@@ -460,7 +482,13 @@ func (h *AdminHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keys, err := h.apiKeys.ListAPIKeysByUserID(r.Context(), claims.UserID)
+	var keys []*models.APIKey
+	var err error
+	if claims.OrgID != nil {
+		keys, err = h.apiKeys.ListAPIKeysByOrgID(r.Context(), *claims.OrgID)
+	} else {
+		keys, err = h.apiKeys.ListAPIKeysByUserID(r.Context(), claims.UserID)
+	}
 	if err != nil {
 		slog.Error("failed to list API keys", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
@@ -501,6 +529,7 @@ func (h *AdminHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		Description: req.Description,
 		UserID:      &userID,
+		OrgID:       claims.OrgID,
 	}
 
 	key, err := h.apiKeys.CreateAPIKey(r.Context(), hash, input)
@@ -811,9 +840,18 @@ func (h *AdminHandler) verifyAPIKeyOwnership(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 
-	if key.UserID == nil || *key.UserID != claims.UserID {
-		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
-		return nil, false
+	// Org-scoped: verify key belongs to the same org
+	if claims.OrgID != nil {
+		if key.OrgID == nil || *key.OrgID != *claims.OrgID {
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
+			return nil, false
+		}
+	} else {
+		// Personal: verify key belongs to the user
+		if key.UserID == nil || *key.UserID != claims.UserID {
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
+			return nil, false
+		}
 	}
 
 	return key, true

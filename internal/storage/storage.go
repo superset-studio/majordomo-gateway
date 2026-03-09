@@ -25,6 +25,7 @@ type APIKeyStorage interface {
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
 	ListAPIKeysByUserID(ctx context.Context, userID uuid.UUID) ([]*models.APIKey, error)
+	ListAPIKeysByOrgID(ctx context.Context, orgID uuid.UUID) ([]*models.APIKey, error)
 }
 
 // UserStorage defines the interface for user CRUD operations
@@ -90,7 +91,40 @@ type UsageFilter struct {
 	Start           time.Time
 	End             time.Time
 	APIKeyID        *uuid.UUID
+	OrgID           *uuid.UUID
 	MetadataFilters []MetadataFilter // AND of up to 2 key=value pairs
+}
+
+// OrganizationStorage defines the interface for organization CRUD operations.
+type OrganizationStorage interface {
+	// Orgs
+	CreateOrganizationWithUser(ctx context.Context, orgInput *models.CreateOrganizationInput, userInput *models.CreateUserInput) (*models.User, *models.Organization, error)
+	CreateOrganization(ctx context.Context, input *models.CreateOrganizationInput, creatorUserID uuid.UUID) (*models.Organization, error)
+	GetOrganizationByID(ctx context.Context, id uuid.UUID) (*models.Organization, error)
+	GetOrganizationBySlug(ctx context.Context, slug string) (*models.Organization, error)
+	UpdateOrganization(ctx context.Context, id uuid.UUID, input *models.UpdateOrganizationInput) (*models.Organization, error)
+
+	// Members
+	AddMember(ctx context.Context, orgID, userID uuid.UUID, role string) error
+	RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error
+	GetMember(ctx context.Context, orgID, userID uuid.UUID) (*models.OrganizationMember, error)
+	ListMembers(ctx context.Context, orgID uuid.UUID) ([]*models.OrganizationMember, error)
+	GetUserOrganization(ctx context.Context, userID uuid.UUID) (*models.Organization, *models.OrganizationMember, error)
+	UpdateMemberRole(ctx context.Context, orgID, userID uuid.UUID, role string) error
+
+	// S3 Config
+	UpdateOrgS3Config(ctx context.Context, orgID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
+	ClearOrgS3Config(ctx context.Context, orgID uuid.UUID) error
+	GetOrgS3Config(ctx context.Context, orgID uuid.UUID) (*models.Organization, error)
+
+	// Invites
+	CreateInvite(ctx context.Context, orgID uuid.UUID, input *models.CreateInviteInput, invitedBy uuid.UUID, token string, expiresAt time.Time) (*models.OrganizationInvite, error)
+	GetInviteByToken(ctx context.Context, token string) (*models.OrganizationInvite, error)
+	GetInviteByID(ctx context.Context, id uuid.UUID) (*models.OrganizationInvite, error)
+	ListPendingInvites(ctx context.Context, orgID uuid.UUID) ([]*models.OrganizationInvite, error)
+	AcceptInvite(ctx context.Context, inviteID uuid.UUID) error
+	DeleteInvite(ctx context.Context, id uuid.UUID) error
+	ListInvitesByEmail(ctx context.Context, email string) ([]*models.OrganizationInvite, error)
 }
 
 // ClaudeAnalyticsStorage defines the interface for Claude Code analytics queries.
@@ -100,7 +134,7 @@ type ClaudeAnalyticsStorage interface {
 	ListClaudeSessionsAdmin(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.ClaudeSessionListItem, int, error)
 	GetClaudeToolUsage(ctx context.Context, filter *UsageFilter, topN int) ([]*models.ClaudeToolUsage, error)
 	GetClaudePerformance(ctx context.Context, filter *UsageFilter) (*models.ClaudePerformance, error)
-	GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID) (*models.ClaudeSessionDetail, error)
+	GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.ClaudeSessionDetail, error)
 	GetClaudeModelUsage(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeModelUsage, error)
 }
 
@@ -112,5 +146,5 @@ type UsageStorage interface {
 	GetAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.APIKeyUsage, error)
 	ListUsageRequests(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.RequestListItem, int, error)
 	GetMetadataBreakdown(ctx context.Context, filter *UsageFilter, keyName string) ([]*models.MetadataBreakdown, error)
-	GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID) (*models.RequestLog, error)
+	GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.RequestLog, error)
 }

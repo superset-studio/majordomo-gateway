@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
 	"github.com/superset-studio/majordomo-gateway/internal/httputil"
@@ -25,6 +26,7 @@ var errEmailAlreadyExists = errors.New("an account with this email already exist
 // OAuthHandler provides OAuth login endpoints for GitHub and Google.
 type OAuthHandler struct {
 	users       storage.UserStorage
+	orgs        storage.OrganizationStorage
 	jwt         *auth.JWTService
 	oauth       config.OAuthConfig
 	baseURL     string // gateway's own base URL for constructing callback URLs
@@ -34,6 +36,7 @@ type OAuthHandler struct {
 // NewOAuthHandler creates a new OAuth handler.
 func NewOAuthHandler(
 	users storage.UserStorage,
+	orgs storage.OrganizationStorage,
 	jwtSvc *auth.JWTService,
 	oauthCfg config.OAuthConfig,
 	baseURL string,
@@ -44,6 +47,7 @@ func NewOAuthHandler(
 	}
 	return &OAuthHandler{
 		users:       users,
+		orgs:        orgs,
 		jwt:         jwtSvc,
 		oauth:       oauthCfg,
 		baseURL:     baseURL,
@@ -243,6 +247,19 @@ func (h *OAuthHandler) findOrCreateOAuthUser(r *http.Request, provider, provider
 		}
 	}
 
+	// Auto-accept pending invites for this email
+	if h.orgs != nil && email != "" {
+		invites, err := h.orgs.ListInvitesByEmail(ctx, email)
+		if err != nil {
+			slog.Warn("failed to check invites for new OAuth user", "error", err, "email", email)
+		} else if len(invites) > 0 {
+			// Accept the first pending invite
+			if err := h.orgs.AcceptInvite(ctx, invites[0].ID); err != nil {
+				slog.Warn("failed to auto-accept invite for OAuth user", "error", err, "invite_id", invites[0].ID)
+			}
+		}
+	}
+
 	return user, nil
 }
 
@@ -256,7 +273,20 @@ func (h *OAuthHandler) redirectWithError(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *OAuthHandler) redirectWithToken(w http.ResponseWriter, r *http.Request, user *models.User) {
-	token, err := h.jwt.GenerateToken(user.ID, user.Username)
+	// Resolve org membership for JWT
+	var orgID *uuid.UUID
+	var orgRole *string
+	if h.orgs != nil {
+		org, member, err := h.orgs.GetUserOrganization(r.Context(), user.ID)
+		if err != nil {
+			slog.Error("failed to get user organization", "error", err)
+		} else if org != nil {
+			orgID = &org.ID
+			orgRole = &member.Role
+		}
+	}
+
+	token, err := h.jwt.GenerateToken(user.ID, user.Username, orgID, orgRole)
 	if err != nil {
 		slog.Error("failed to generate JWT for OAuth user", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")

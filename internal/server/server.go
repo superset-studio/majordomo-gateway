@@ -29,6 +29,7 @@ type Server struct {
 type AdminConfig struct {
 	AdminHandler *api.AdminHandler
 	OAuthHandler *api.OAuthHandler
+	OrgHandler   *api.OrgHandler
 	JWTService   *auth.JWTService
 	CORSOrigins  []string
 }
@@ -55,6 +56,10 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 	if adminCfg != nil && adminCfg.AdminHandler != nil && adminCfg.JWTService != nil {
 		router.Route("/api/v1/admin", func(r chi.Router) {
 			r.Post("/login", adminCfg.AdminHandler.Login)
+
+			if adminCfg.OrgHandler != nil {
+				r.Post("/orgs/signup", adminCfg.OrgHandler.OrgSignup)
+			}
 
 			if adminCfg.OAuthHandler != nil {
 				r.Get("/auth/github", adminCfg.OAuthHandler.GitHubLogin)
@@ -109,6 +114,25 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 			if metadataHandler != nil {
 					r.Get("/metadata-keys", metadataHandler.ListMetadataKeys)
 					r.Put("/api-keys/{id}/metadata-keys/{keyName}", metadataHandler.UpdateMetadataKey)
+				}
+
+				if adminCfg.OrgHandler != nil {
+					r.Get("/orgs/current", adminCfg.OrgHandler.GetCurrentOrg)
+					r.Put("/orgs/current", adminCfg.OrgHandler.UpdateOrg)
+
+					r.Get("/orgs/current/members", adminCfg.OrgHandler.ListMembers)
+					r.Put("/orgs/current/members/{userId}/role", adminCfg.OrgHandler.UpdateMemberRole)
+					r.Delete("/orgs/current/members/{userId}", adminCfg.OrgHandler.RemoveMember)
+
+					r.Post("/orgs/current/invites", adminCfg.OrgHandler.CreateInvite)
+					r.Get("/orgs/current/invites", adminCfg.OrgHandler.ListPendingInvites)
+					r.Delete("/orgs/current/invites/{id}", adminCfg.OrgHandler.RevokeInvite)
+
+					r.Post("/invites/{token}/accept", adminCfg.OrgHandler.AcceptInvite)
+
+					r.Get("/orgs/current/s3-config", adminCfg.OrgHandler.GetOrgS3Config)
+					r.Put("/orgs/current/s3-config", adminCfg.OrgHandler.UpdateOrgS3Config)
+					r.Delete("/orgs/current/s3-config", adminCfg.OrgHandler.ClearOrgS3Config)
 				}
 			})
 		})

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
@@ -24,7 +25,7 @@ func NewClaudeAnalyticsHandler(analytics storage.ClaudeAnalyticsStorage, apiKeys
 	}
 }
 
-func (h *ClaudeAnalyticsHandler) verifyAPIKeyBelongsToUser(w http.ResponseWriter, r *http.Request, apiKeyID uuid.UUID, userID uuid.UUID) bool {
+func (h *ClaudeAnalyticsHandler) verifyAPIKeyOwnership(w http.ResponseWriter, r *http.Request, apiKeyID uuid.UUID, claims *auth.JWTClaims) bool {
 	key, err := h.apiKeys.GetAPIKeyByID(r.Context(), apiKeyID)
 	if err != nil {
 		if err == storage.ErrAPIKeyNotFound {
@@ -36,9 +37,16 @@ func (h *ClaudeAnalyticsHandler) verifyAPIKeyBelongsToUser(w http.ResponseWriter
 		return false
 	}
 
-	if key.UserID == nil || *key.UserID != userID {
-		httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
-		return false
+	if claims.OrgID != nil {
+		if key.OrgID == nil || *key.OrgID != *claims.OrgID {
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
+			return false
+		}
+	} else {
+		if key.UserID == nil || *key.UserID != claims.UserID {
+			httputil.WriteJSONError(w, http.StatusNotFound, "API key not found")
+			return false
+		}
 	}
 
 	return true
@@ -57,10 +65,10 @@ func (h *ClaudeAnalyticsHandler) GetSummary(w http.ResponseWriter, r *http.Reque
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -88,10 +96,10 @@ func (h *ClaudeAnalyticsHandler) GetDailyStats(w http.ResponseWriter, r *http.Re
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -119,10 +127,10 @@ func (h *ClaudeAnalyticsHandler) ListSessions(w http.ResponseWriter, r *http.Req
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -165,10 +173,10 @@ func (h *ClaudeAnalyticsHandler) GetToolUsage(w http.ResponseWriter, r *http.Req
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -196,10 +204,10 @@ func (h *ClaudeAnalyticsHandler) GetPerformance(w http.ResponseWriter, r *http.R
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -227,10 +235,10 @@ func (h *ClaudeAnalyticsHandler) GetModelUsage(w http.ResponseWriter, r *http.Re
 		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	filter.UserID = claims.UserID
+	setFilterScope(filter, claims)
 
 	if filter.APIKeyID != nil {
-		if !h.verifyAPIKeyBelongsToUser(w, r, *filter.APIKeyID, claims.UserID) {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
 			return
 		}
 	}
@@ -259,7 +267,7 @@ func (h *ClaudeAnalyticsHandler) GetSessionDetail(w http.ResponseWriter, r *http
 		return
 	}
 
-	detail, err := h.analytics.GetClaudeSessionDetail(r.Context(), id, claims.UserID)
+	detail, err := h.analytics.GetClaudeSessionDetail(r.Context(), id, claims.UserID, claims.OrgID)
 	if err != nil {
 		if err == storage.ErrClaudeSessionNotFound {
 			httputil.WriteJSONError(w, http.StatusNotFound, "session not found")

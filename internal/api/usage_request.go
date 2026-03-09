@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
@@ -98,6 +99,16 @@ func decodeUsageRequest(r *http.Request) (*storage.UsageFilter, *usageRequest, e
 	}
 
 	return filter, &req, nil
+}
+
+// setFilterScope sets the ownership scope on a UsageFilter based on JWT claims.
+// If the user belongs to an org, queries are scoped to the org; otherwise to the user.
+func setFilterScope(filter *storage.UsageFilter, claims *auth.JWTClaims) {
+	if claims.OrgID != nil {
+		filter.OrgID = claims.OrgID
+	} else {
+		filter.UserID = claims.UserID
+	}
 }
 
 // parseDate parses YYYY-MM-DD or RFC3339.

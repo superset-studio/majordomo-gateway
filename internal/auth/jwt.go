@@ -10,8 +10,10 @@ import (
 
 // JWTClaims represents the claims stored in a JWT token
 type JWTClaims struct {
-	UserID   uuid.UUID `json:"user_id"`
-	Username string    `json:"username"`
+	UserID   uuid.UUID  `json:"user_id"`
+	Username string     `json:"username"`
+	OrgID    *uuid.UUID `json:"org_id,omitempty"`
+	OrgRole  *string    `json:"org_role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -29,12 +31,15 @@ func NewJWTService(secret string, expiry time.Duration) *JWTService {
 	}
 }
 
-// GenerateToken creates a new signed JWT for the given user
-func (s *JWTService) GenerateToken(userID uuid.UUID, username string) (string, error) {
+// GenerateToken creates a new signed JWT for the given user.
+// Pass nil for orgID and orgRole for personal (non-org) accounts.
+func (s *JWTService) GenerateToken(userID uuid.UUID, username string, orgID *uuid.UUID, orgRole *string) (string, error) {
 	now := time.Now()
 	claims := JWTClaims{
 		UserID:   userID,
 		Username: username,
+		OrgID:    orgID,
+		OrgRole:  orgRole,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.expiry)),
 			IssuedAt:  jwt.NewNumericDate(now),
