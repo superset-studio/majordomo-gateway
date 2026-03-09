@@ -152,7 +152,7 @@ func runServe(args []string) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, gcsStorage, userGCSStorage, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, gcsStorage, userGCSStorage, store, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig

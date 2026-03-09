@@ -386,7 +386,7 @@ func (h *Handler) logRequest(
 
 	// Org S3 body storage — when user S3 is not configured and key belongs to an org.
 	orgS3Uploaded := false
-	if !userS3Uploaded && apiKeyInfo.OrgID != nil && h.userS3Storage != nil {
+	if !bodyUploaded && apiKeyInfo.OrgID != nil && h.userS3Storage != nil {
 		orgS3Cfg := h.getOrgS3Config(ctx, *apiKeyInfo.OrgID)
 		if orgS3Cfg != nil {
 			apiKeyName := resolveAPIKeyName(apiKeyInfo)
