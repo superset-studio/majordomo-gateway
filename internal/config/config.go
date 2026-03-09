@@ -15,6 +15,7 @@ type Config struct {
 	Pricing   PricingConfig   `mapstructure:"pricing"`
 	Providers ProvidersConfig `mapstructure:"providers"`
 	S3        S3Config        `mapstructure:"s3"`
+	GCS       GCSConfig       `mapstructure:"gcs"`
 	Metadata  MetadataConfig  `mapstructure:"metadata"`
 	Secrets   SecretsConfig   `mapstructure:"secrets"`
 	JWT       JWTConfig       `mapstructure:"jwt"`
@@ -86,7 +87,7 @@ type LoggingConfig struct {
 	MaxBodySize         int    `mapstructure:"max_body_size"`          // Legacy fallback
 	MaxRequestBodySize  int    `mapstructure:"max_request_body_size"`
 	MaxResponseBodySize int    `mapstructure:"max_response_body_size"`
-	BodyStorage         string `mapstructure:"body_storage"` // "none", "postgres", "s3"
+	BodyStorage         string `mapstructure:"body_storage"` // "none", "postgres", "s3", "gcs"
 }
 
 // EffectiveMaxRequestBodySize returns MaxRequestBodySize if set, otherwise MaxBodySize.
@@ -118,6 +119,14 @@ type S3Config struct {
 	Endpoint        string `mapstructure:"endpoint"` // For MinIO/LocalStack
 	AccessKeyID     string `mapstructure:"access_key_id"`
 	SecretAccessKey string `mapstructure:"secret_access_key"`
+}
+
+type GCSConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	Bucket          string `mapstructure:"bucket"`
+	CredentialsFile string `mapstructure:"credentials_file"` // path to service account JSON
+	CredentialsJSON string `mapstructure:"credentials_json"` // inline service account JSON
+	// both empty → Application Default Credentials (ADC)
 }
 
 type PricingConfig struct {
@@ -197,7 +206,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.max_body_size", 65536)
 	v.SetDefault("logging.max_request_body_size", 65536)
 	v.SetDefault("logging.max_response_body_size", 65536)
-	v.SetDefault("logging.body_storage", "none") // "none", "postgres", "s3"
+	v.SetDefault("logging.body_storage", "none") // "none", "postgres", "s3", "gcs"
 
 	v.SetDefault("s3.enabled", false)
 	v.SetDefault("s3.bucket", "")
@@ -205,6 +214,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("s3.endpoint", "")
 	v.SetDefault("s3.access_key_id", "")
 	v.SetDefault("s3.secret_access_key", "")
+
+	v.SetDefault("gcs.enabled", false)
+	v.SetDefault("gcs.bucket", "")
+	v.SetDefault("gcs.credentials_file", "")
+	v.SetDefault("gcs.credentials_json", "")
 
 	v.SetDefault("pricing.remote_url", "https://www.llm-prices.com/current-v1.json")
 	v.SetDefault("pricing.refresh_interval", time.Hour)

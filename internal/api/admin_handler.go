@@ -319,6 +319,127 @@ func (h *AdminHandler) DeleteS3Config(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// --- GCS Config ---
+
+type updateGCSConfigRequest struct {
+	Bucket          string `json:"bucket"`
+	CredentialsJSON string `json:"credentialsJSON"` // service account JSON; empty = ADC
+}
+
+type gcsConfigResponse struct {
+	Bucket         string `json:"bucket"`
+	CredentialsSet bool   `json:"credentialsSet"`
+}
+
+// GetGCSConfig handles GET /api/v1/admin/me/gcs-config
+func (h *AdminHandler) GetGCSConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	user, err := h.users.GetUserGCSConfig(r.Context(), claims.UserID)
+	if err != nil {
+		slog.Error("failed to get user GCS config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := gcsConfigResponse{
+		CredentialsSet: user.GCSCredentialsJSONEncrypted != nil && *user.GCSCredentialsJSONEncrypted != "",
+	}
+	if user.GCSBucket != nil {
+		resp.Bucket = *user.GCSBucket
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// UpdateGCSConfig handles PUT /api/v1/admin/me/gcs-config
+func (h *AdminHandler) UpdateGCSConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req updateGCSConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Bucket == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required")
+		return
+	}
+
+	if h.secrets == nil {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
+		return
+	}
+
+	// Validate that credentialsJSON is valid JSON if provided
+	if req.CredentialsJSON != "" {
+		if !json.Valid([]byte(req.CredentialsJSON)) {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "credentialsJSON must be valid JSON")
+			return
+		}
+	}
+
+	// Validate GCS connectivity before saving
+	gcsCfg := &models.UserGCSConfig{Bucket: req.Bucket}
+	if req.CredentialsJSON != "" {
+		gcsCfg.CredentialsJSON = []byte(req.CredentialsJSON)
+	}
+	if err := storage.ValidateGCSConfig(r.Context(), gcsCfg); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "GCS validation failed: "+err.Error())
+		return
+	}
+
+	encCredentialsJSON := ""
+	if req.CredentialsJSON != "" {
+		var err error
+		encCredentialsJSON, err = h.secrets.Encrypt(req.CredentialsJSON)
+		if err != nil {
+			slog.Error("failed to encrypt GCS credentials JSON", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
+
+	if err := h.users.UpdateUserGCSConfig(r.Context(), claims.UserID, req.Bucket, encCredentialsJSON); err != nil {
+		slog.Error("failed to update user GCS config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := gcsConfigResponse{
+		Bucket:         req.Bucket,
+		CredentialsSet: req.CredentialsJSON != "",
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// DeleteGCSConfig handles DELETE /api/v1/admin/me/gcs-config
+func (h *AdminHandler) DeleteGCSConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.users.ClearUserGCSConfig(r.Context(), claims.UserID); err != nil {
+		slog.Error("failed to clear user GCS config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 // --- API Keys ---
 
 type adminCreateAPIKeyRequest struct {

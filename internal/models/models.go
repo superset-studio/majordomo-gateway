@@ -23,6 +23,10 @@ type User struct {
 	S3Endpoint                 *string `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
 	S3AccessKeyIDEncrypted     *string `json:"-" db:"s3_access_key_id_encrypted"`
 	S3SecretAccessKeyEncrypted *string `json:"-" db:"s3_secret_access_key_encrypted"`
+
+	// Per-user GCS body storage configuration
+	GCSBucket                   *string `json:"gcs_bucket,omitempty" db:"gcs_bucket"`
+	GCSCredentialsJSONEncrypted *string `json:"-" db:"gcs_credentials_json_encrypted"`
 }
 
 // UserS3Config holds decrypted S3 configuration for per-user body storage.
@@ -32,6 +36,12 @@ type UserS3Config struct {
 	Endpoint       string
 	AccessKeyID    string
 	SecretAccessKey string
+}
+
+// UserGCSConfig holds decrypted GCS configuration for per-user body storage.
+type UserGCSConfig struct {
+	Bucket          string
+	CredentialsJSON []byte // service account JSON; nil = ADC
 }
 
 // CreateUserInput contains fields for creating a new user

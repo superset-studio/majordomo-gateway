@@ -189,3 +189,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS s3_secret_access_key_encrypted TEXT;
 
 -- Optional session name for Claude Code sessions
 ALTER TABLE claude_sessions ADD COLUMN IF NOT EXISTS session_name VARCHAR(255);
+
+-- Per-user GCS body storage configuration
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gcs_bucket VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gcs_credentials_json_encrypted TEXT;

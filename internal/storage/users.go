@@ -14,7 +14,7 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 )
 
-const userColumns = `id, username, password_hash, email, auth_provider, auth_provider_id, is_active, created_at, s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted`
+const userColumns = `id, username, password_hash, email, auth_provider, auth_provider_id, is_active, created_at, s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted, gcs_bucket, gcs_credentials_json_encrypted`
 
 // CreateUser creates a new user with a bcrypt-hashed password
 func (s *PostgresStorage) CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
@@ -163,6 +163,65 @@ func (s *PostgresStorage) ClearUserS3Config(ctx context.Context, userID uuid.UUI
 // GetUserS3Config retrieves S3 configuration columns for a user.
 func (s *PostgresStorage) GetUserS3Config(ctx context.Context, userID uuid.UUID) (*models.User, error) {
 	query := `SELECT s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted FROM users WHERE id = $1`
+
+	var user models.User
+	err := s.db.GetContext(ctx, &user, query, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// UpdateUserGCSConfig sets GCS body storage configuration for a user.
+func (s *PostgresStorage) UpdateUserGCSConfig(ctx context.Context, userID uuid.UUID, bucket, encCredentialsJSON string) error {
+	query := `
+		UPDATE users
+		SET gcs_bucket = $1, gcs_credentials_json_encrypted = $2
+		WHERE id = $3`
+
+	result, err := s.db.ExecContext(ctx, query, bucket, encCredentialsJSON, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ClearUserGCSConfig removes GCS body storage configuration for a user.
+func (s *PostgresStorage) ClearUserGCSConfig(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET gcs_bucket = NULL, gcs_credentials_json_encrypted = NULL
+		WHERE id = $1`
+
+	result, err := s.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// GetUserGCSConfig retrieves GCS configuration columns for a user.
+func (s *PostgresStorage) GetUserGCSConfig(ctx context.Context, userID uuid.UUID) (*models.User, error) {
+	query := `SELECT gcs_bucket, gcs_credentials_json_encrypted FROM users WHERE id = $1`
 
 	var user models.User
 	err := s.db.GetContext(ctx, &user, query, userID)

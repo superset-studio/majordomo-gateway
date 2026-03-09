@@ -107,6 +107,21 @@ func runServe(args []string) {
 		slog.Info("S3 body storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
 	}
 
+	var gcsStorage *storage.GCSBodyStorage
+	if cfg.GCS.Enabled {
+		gcsStorage, err = storage.NewGCSBodyStorage(ctx, storage.GCSBodyStorageConfig{
+			Bucket:          cfg.GCS.Bucket,
+			CredentialsFile: cfg.GCS.CredentialsFile,
+			CredentialsJSON: cfg.GCS.CredentialsJSON,
+		})
+		if err != nil {
+			slog.Error("failed to initialize GCS storage", "error", err)
+			os.Exit(1)
+		}
+		defer gcsStorage.Close()
+		slog.Info("GCS body storage enabled", "bucket", cfg.GCS.Bucket)
+	}
+
 	resolver := auth.NewResolver(store)
 
 	// Set up proxy key support if encryption key is configured
@@ -127,8 +142,9 @@ func runServe(args []string) {
 	sessionMgr := claudecode.NewSessionManager(store)
 	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
 
-	// Set up per-user S3 body storage
+	// Set up per-user S3 and GCS body storage
 	userS3Storage := storage.NewUserS3Storage()
+	userGCSStorage := storage.NewUserGCSStorage()
 
 	// Determine secret store and user store for proxy handler
 	var proxySecretStore secrets.SecretStore
@@ -136,7 +152,7 @@ func runServe(args []string) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, gcsStorage, userGCSStorage, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig

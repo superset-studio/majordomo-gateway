@@ -22,24 +22,33 @@ import (
 )
 
 type Handler struct {
-	upstream       *UpstreamClient
-	storage        storage.Storage
-	s3Storage      *storage.S3BodyStorage
-	userS3Storage  *storage.UserS3Storage
-	userStore      storage.UserStorage
-	secretStore    secrets.SecretStore
-	pricing        *pricing.Service
-	resolver       *auth.Resolver
-	proxyResolver  *auth.ProxyResolver
-	sessionMgr     *claudecode.SessionManager
-	config         *config.Config
-	providers      map[provider.Provider]string
-	userS3Cache    sync.Map // userID (string) → *cachedUserS3Config
-	userS3CacheTTL time.Duration
+	upstream        *UpstreamClient
+	storage         storage.Storage
+	s3Storage       *storage.S3BodyStorage
+	userS3Storage   *storage.UserS3Storage
+	gcsStorage      *storage.GCSBodyStorage
+	userGCSStorage  *storage.UserGCSStorage
+	userStore       storage.UserStorage
+	secretStore     secrets.SecretStore
+	pricing         *pricing.Service
+	resolver        *auth.Resolver
+	proxyResolver   *auth.ProxyResolver
+	sessionMgr      *claudecode.SessionManager
+	config          *config.Config
+	providers       map[provider.Provider]string
+	userS3Cache     sync.Map // userID (string) → *cachedUserS3Config
+	userS3CacheTTL  time.Duration
+	userGCSCache    sync.Map // userID (string) → *cachedUserGCSConfig
+	userGCSCacheTTL time.Duration
 }
 
 type cachedUserS3Config struct {
 	config    *models.UserS3Config
+	fetchedAt time.Time
+}
+
+type cachedUserGCSConfig struct {
+	config    *models.UserGCSConfig
 	fetchedAt time.Time
 }
 
@@ -53,6 +62,8 @@ func NewHandler(
 	store storage.Storage,
 	s3Storage *storage.S3BodyStorage,
 	userS3Storage *storage.UserS3Storage,
+	gcsStorage *storage.GCSBodyStorage,
+	userGCSStorage *storage.UserGCSStorage,
 	userStore storage.UserStorage,
 	secretStore secrets.SecretStore,
 	pricingSvc *pricing.Service,
@@ -68,19 +79,22 @@ func NewHandler(
 	}
 
 	return &Handler{
-		upstream:       NewUpstreamClient(cfg.Server.UpstreamTimeout),
-		storage:        store,
-		s3Storage:      s3Storage,
-		userS3Storage:  userS3Storage,
-		userStore:      userStore,
-		secretStore:    secretStore,
-		pricing:        pricingSvc,
-		resolver:       resolver,
-		proxyResolver:  proxyResolver,
-		sessionMgr:     sessionMgr,
-		config:         cfg,
-		providers:      providers,
-		userS3CacheTTL: 5 * time.Minute,
+		upstream:        NewUpstreamClient(cfg.Server.UpstreamTimeout),
+		storage:         store,
+		s3Storage:       s3Storage,
+		userS3Storage:   userS3Storage,
+		gcsStorage:      gcsStorage,
+		userGCSStorage:  userGCSStorage,
+		userStore:       userStore,
+		secretStore:     secretStore,
+		pricing:         pricingSvc,
+		resolver:        resolver,
+		proxyResolver:   proxyResolver,
+		sessionMgr:      sessionMgr,
+		config:          cfg,
+		providers:       providers,
+		userS3CacheTTL:  5 * time.Minute,
+		userGCSCacheTTL: 5 * time.Minute,
 	}
 }
 
@@ -303,38 +317,87 @@ func (h *Handler) logRequest(
 		ModelAliasFound: cost.ModelAliasFound,
 	}
 
-	// Per-user S3 body storage — when configured, takes precedence over global body storage.
-	userS3Uploaded := false
-	if apiKeyInfo.UserID != nil && h.userS3Storage != nil {
-		userS3Cfg := h.getUserS3Config(ctx, *apiKeyInfo.UserID)
-		if userS3Cfg != nil {
-			apiKeyName := resolveAPIKeyName(apiKeyInfo)
-			var s3Key string
-			if isClaudeCode && sessionID != nil {
-				s3Key = storage.GenerateUserS3ClaudeCodeKey(apiKeyName, *sessionID, sessionName, requestID, requestedAt)
-			} else {
-				s3Key = storage.GenerateUserS3RequestKey(apiKeyName, requestID, requestedAt)
+	// Per-user body storage — GCS takes priority over S3; both take priority over global.
+	bodyUploaded := false
+	if apiKeyInfo.UserID != nil {
+		// 1. Per-user GCS
+		if h.userGCSStorage != nil {
+			userGCSCfg := h.getUserGCSConfig(ctx, *apiKeyInfo.UserID)
+			if userGCSCfg != nil {
+				apiKeyName := resolveAPIKeyName(apiKeyInfo)
+				var objKey string
+				if isClaudeCode && sessionID != nil {
+					objKey = storage.GenerateUserGCSClaudeCodeKey(apiKeyName, *sessionID, sessionName, requestID, requestedAt)
+				} else {
+					objKey = storage.GenerateUserGCSRequestKey(apiKeyName, requestID, requestedAt)
+				}
+				log.BodyS3Key = &objKey
+				h.userGCSStorage.Upload(ctx, *apiKeyInfo.UserID, userGCSCfg, &storage.BodyUpload{
+					Key:             objKey,
+					RequestID:       requestID,
+					Timestamp:       requestedAt,
+					RequestMethod:   req.Method,
+					RequestPath:     req.URL.Path,
+					RequestHeaders:  customHeaders,
+					RequestBody:     reqBody,
+					ResponseStatus:  resp.StatusCode,
+					ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
+					ResponseBody:    resp.Body,
+				})
+				bodyUploaded = true
 			}
-			log.BodyS3Key = &s3Key
-			h.userS3Storage.Upload(ctx, *apiKeyInfo.UserID, userS3Cfg, &storage.BodyUpload{
-				Key:             s3Key,
-				RequestID:       requestID,
-				Timestamp:       requestedAt,
-				RequestMethod:   req.Method,
-				RequestPath:     req.URL.Path,
-				RequestHeaders:  customHeaders,
-				RequestBody:     reqBody,
-				ResponseStatus:  resp.StatusCode,
-				ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
-				ResponseBody:    resp.Body,
-			})
-			userS3Uploaded = true
+		}
+
+		// 2. Per-user S3
+		if !bodyUploaded && h.userS3Storage != nil {
+			userS3Cfg := h.getUserS3Config(ctx, *apiKeyInfo.UserID)
+			if userS3Cfg != nil {
+				apiKeyName := resolveAPIKeyName(apiKeyInfo)
+				var s3Key string
+				if isClaudeCode && sessionID != nil {
+					s3Key = storage.GenerateUserS3ClaudeCodeKey(apiKeyName, *sessionID, sessionName, requestID, requestedAt)
+				} else {
+					s3Key = storage.GenerateUserS3RequestKey(apiKeyName, requestID, requestedAt)
+				}
+				log.BodyS3Key = &s3Key
+				h.userS3Storage.Upload(ctx, *apiKeyInfo.UserID, userS3Cfg, &storage.BodyUpload{
+					Key:             s3Key,
+					RequestID:       requestID,
+					Timestamp:       requestedAt,
+					RequestMethod:   req.Method,
+					RequestPath:     req.URL.Path,
+					RequestHeaders:  customHeaders,
+					RequestBody:     reqBody,
+					ResponseStatus:  resp.StatusCode,
+					ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
+					ResponseBody:    resp.Body,
+				})
+				bodyUploaded = true
+			}
 		}
 	}
 
-	// Global body storage — skipped when per-user S3 handled the upload.
-	if !userS3Uploaded {
+	// Global body storage — skipped when per-user storage handled the upload.
+	if !bodyUploaded {
 		switch h.config.Logging.BodyStorage {
+		case "gcs":
+			if h.gcsStorage != nil {
+				gcsKey := h.gcsStorage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
+				log.BodyS3Key = &gcsKey
+
+				h.gcsStorage.Upload(&storage.BodyUpload{
+					Key:             gcsKey,
+					RequestID:       requestID,
+					Timestamp:       requestedAt,
+					RequestMethod:   req.Method,
+					RequestPath:     req.URL.Path,
+					RequestHeaders:  customHeaders,
+					RequestBody:     reqBody,
+					ResponseStatus:  resp.StatusCode,
+					ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
+					ResponseBody:    resp.Body,
+				})
+			}
 		case "s3":
 			if h.s3Storage != nil {
 				s3Key := h.s3Storage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
@@ -497,6 +560,52 @@ func (h *Handler) getUserS3Config(ctx context.Context, userID uuid.UUID) *models
 	}
 
 	h.userS3Cache.Store(key, &cachedUserS3Config{config: cfg, fetchedAt: time.Now()})
+	return cfg
+}
+
+// getUserGCSConfig retrieves and caches the decrypted GCS config for a user.
+// Returns nil if the user has no GCS config or if decryption fails.
+func (h *Handler) getUserGCSConfig(ctx context.Context, userID uuid.UUID) *models.UserGCSConfig {
+	key := userID.String()
+
+	if cached, ok := h.userGCSCache.Load(key); ok {
+		entry := cached.(*cachedUserGCSConfig)
+		if time.Since(entry.fetchedAt) < h.userGCSCacheTTL {
+			return entry.config
+		}
+	}
+
+	if h.userStore == nil || h.secretStore == nil {
+		return nil
+	}
+
+	user, err := h.userStore.GetUserGCSConfig(ctx, userID)
+	if err != nil {
+		slog.Debug("failed to get user GCS config", "error", err, "user_id", userID)
+		h.userGCSCache.Store(key, &cachedUserGCSConfig{config: nil, fetchedAt: time.Now()})
+		return nil
+	}
+
+	if user.GCSBucket == nil || *user.GCSBucket == "" {
+		h.userGCSCache.Store(key, &cachedUserGCSConfig{config: nil, fetchedAt: time.Now()})
+		return nil
+	}
+
+	cfg := &models.UserGCSConfig{
+		Bucket: *user.GCSBucket,
+	}
+
+	if user.GCSCredentialsJSONEncrypted != nil && *user.GCSCredentialsJSONEncrypted != "" {
+		credsJSON, err := h.secretStore.Decrypt(*user.GCSCredentialsJSONEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt GCS credentials JSON", "error", err, "user_id", userID)
+			h.userGCSCache.Store(key, &cachedUserGCSConfig{config: nil, fetchedAt: time.Now()})
+			return nil
+		}
+		cfg.CredentialsJSON = []byte(credsJSON)
+	}
+
+	h.userGCSCache.Store(key, &cachedUserGCSConfig{config: cfg, fetchedAt: time.Now()})
 	return cfg
 }
 
