@@ -16,6 +16,8 @@ type usageRequest struct {
 	Start           string           `json:"start"`
 	End             string           `json:"end"`
 	APIKeyID        string           `json:"api_key_id"`
+	Provider        string           `json:"provider"`
+	Model           string           `json:"model"`
 	MetadataFilters []metadataFilter `json:"metadata_filters"`
 	Limit           int              `json:"limit"`
 	Offset          int              `json:"offset"`
@@ -48,6 +50,16 @@ func decodeUsageRequest(r *http.Request) (*storage.UsageFilter, *usageRequest, e
 			return nil, nil, fmt.Errorf("invalid api_key_id: %w", err)
 		}
 		filter.APIKeyID = &parsed
+	}
+
+	// Parse provider/model filters
+	if req.Provider != "" {
+		p := req.Provider
+		filter.Provider = &p
+	}
+	if req.Model != "" {
+		m := req.Model
+		filter.Model = &m
 	}
 
 	// Parse metadata filters

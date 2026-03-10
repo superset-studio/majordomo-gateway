@@ -40,6 +40,12 @@ func (h *UsageHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	setFilterScope(filter, claims)
 
+	if filter.APIKeyID != nil {
+		if !h.verifyAPIKeyOwnership(w, r, *filter.APIKeyID, claims) {
+			return
+		}
+	}
+
 	summary, err := h.usage.GetUsageSummary(r.Context(), filter)
 	if err != nil {
 		slog.Error("failed to get usage summary", "error", err)

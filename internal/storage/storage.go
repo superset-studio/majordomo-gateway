@@ -89,6 +89,8 @@ type UsageFilter struct {
 	End             time.Time
 	APIKeyID        *uuid.UUID
 	OrgID           *uuid.UUID
+	Provider        *string
+	Model           *string
 	MetadataFilters []MetadataFilter // AND of up to 2 key=value pairs
 }
 
