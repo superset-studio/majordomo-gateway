@@ -105,6 +105,7 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 				r.Post("/claude/tools", claudeAnalyticsHandler.GetToolUsage)
 				r.Post("/claude/performance", claudeAnalyticsHandler.GetPerformance)
 				r.Post("/claude/models", claudeAnalyticsHandler.GetModelUsage)
+				r.Post("/claude/api-keys", claudeAnalyticsHandler.GetAPIKeyBreakdown)
 				r.Get("/claude/sessions/{id}", claudeAnalyticsHandler.GetSessionDetail)
 			}
 

@@ -332,6 +332,43 @@ func (s *PostgresStorage) GetClaudeSessionDetail(ctx context.Context, sessionID 
 	}, nil
 }
 
+func (s *PostgresStorage) GetClaudeAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeAPIKeyUsage, error) {
+	// Build base where without API key filter — we want all keys for this org/user.
+	var ownerClause string
+	var ownerArg interface{}
+	if filter.OrgID != nil {
+		ownerClause = `ak.org_id = $1`
+		ownerArg = *filter.OrgID
+	} else {
+		ownerClause = `ak.user_id = $1`
+		ownerArg = filter.UserID
+	}
+	args := []interface{}{ownerArg, filter.Start, filter.End}
+	where := ownerClause + ` AND cs.started_at >= $2 AND cs.started_at < $3`
+	where, args = appendClaudeMetadataExists(where, args, filter.MetadataFilters)
+
+	query := `
+		SELECT
+			ak.id AS api_key_id,
+			ak.name AS api_key_name,
+			COUNT(*) AS session_count,
+			COALESCE(SUM(cs.total_requests), 0) AS total_requests,
+			COALESCE(SUM(cs.total_cost), 0) AS total_cost,
+			COALESCE(SUM(cs.total_input_tokens), 0) AS total_input_tokens,
+			COALESCE(SUM(cs.total_output_tokens), 0) AS total_output_tokens
+		FROM claude_sessions cs
+		JOIN api_keys ak ON ak.id = cs.majordomo_api_key_id
+		WHERE ` + where + `
+		GROUP BY ak.id, ak.name
+		ORDER BY total_cost DESC`
+
+	var result []*models.ClaudeAPIKeyUsage
+	if err := s.db.SelectContext(ctx, &result, query, args...); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *PostgresStorage) GetClaudeModelUsage(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeModelUsage, error) {
 	where, args := claudeBaseWhere(filter)
 	where, args = appendClaudeMetadataFilters(where, args, filter.MetadataFilters)

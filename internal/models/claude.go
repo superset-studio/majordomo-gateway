@@ -122,6 +122,17 @@ type ClaudeSessionDetailRow struct {
 	AvgResponseTimeMs float64 `json:"avgResponseTimeMs" db:"avg_response_time_ms"`
 }
 
+// ClaudeAPIKeyUsage holds per-API-key aggregate metrics for Claude Code sessions.
+type ClaudeAPIKeyUsage struct {
+	APIKeyID          uuid.UUID `json:"apiKeyId" db:"api_key_id"`
+	APIKeyName        string    `json:"apiKeyName" db:"api_key_name"`
+	SessionCount      int64     `json:"sessionCount" db:"session_count"`
+	TotalRequests     int64     `json:"totalRequests" db:"total_requests"`
+	TotalCost         float64   `json:"totalCost" db:"total_cost"`
+	TotalInputTokens  int64     `json:"totalInputTokens" db:"total_input_tokens"`
+	TotalOutputTokens int64     `json:"totalOutputTokens" db:"total_output_tokens"`
+}
+
 // ClaudeSessionDetail holds a full session with aggregated rows.
 type ClaudeSessionDetail struct {
 	Session *ClaudeSession            `json:"session"`

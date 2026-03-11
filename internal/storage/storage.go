@@ -135,6 +135,7 @@ type ClaudeAnalyticsStorage interface {
 	GetClaudePerformance(ctx context.Context, filter *UsageFilter) (*models.ClaudePerformance, error)
 	GetClaudeSessionDetail(ctx context.Context, sessionID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.ClaudeSessionDetail, error)
 	GetClaudeModelUsage(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeModelUsage, error)
+	GetClaudeAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.ClaudeAPIKeyUsage, error)
 }
 
 // UsageStorage defines the interface for usage reporting queries.

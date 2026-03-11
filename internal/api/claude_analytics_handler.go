@@ -253,6 +253,31 @@ func (h *ClaudeAnalyticsHandler) GetModelUsage(w http.ResponseWriter, r *http.Re
 	httputil.WriteJSON(w, http.StatusOK, models)
 }
 
+// GetAPIKeyBreakdown handles POST /api/v1/admin/claude/api-keys
+func (h *ClaudeAnalyticsHandler) GetAPIKeyBreakdown(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	filter, _, err := decodeUsageRequest(r)
+	if err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	setFilterScope(filter, claims)
+
+	breakdown, err := h.analytics.GetClaudeAPIKeyBreakdown(r.Context(), filter)
+	if err != nil {
+		slog.Error("failed to get claude api key breakdown", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, breakdown)
+}
+
 // GetSessionDetail handles GET /api/v1/admin/claude/sessions/{id}
 func (h *ClaudeAnalyticsHandler) GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
