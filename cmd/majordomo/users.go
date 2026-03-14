@@ -43,6 +43,7 @@ Run 'majordomo users <subcommand> --help' for more information.`)
 func runUsersCreate(args []string) {
 	fs := flag.NewFlagSet("users create", flag.ExitOnError)
 	username := fs.String("username", "", "Username (required)")
+	email := fs.String("email", "", "Email (defaults to username if not provided)")
 	password := fs.String("password", "", "Password (required)")
 	configPath := fs.String("config", "", "Path to config file")
 	fs.Parse(args)
@@ -59,11 +60,17 @@ func runUsersCreate(args []string) {
 		os.Exit(1)
 	}
 
+	userEmail := *email
+	if userEmail == "" {
+		userEmail = *username
+	}
+
 	store := connectDB(*configPath, nil)
 	defer store.Close()
 
 	input := &models.CreateUserInput{
 		Username: *username,
+		Email:    userEmail,
 		Password: *password,
 	}
 
@@ -73,10 +80,16 @@ func runUsersCreate(args []string) {
 		os.Exit(1)
 	}
 
+	// CLI-created users are auto-verified
+	if err := store.MarkUserEmailVerified(context.Background(), user.ID); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to mark email as verified: %v\n", err)
+	}
+
 	fmt.Println("User created successfully!")
 	fmt.Println()
 	fmt.Printf("ID:       %s\n", user.ID)
 	fmt.Printf("Username: %s\n", user.Username)
+	fmt.Printf("Email:    %s\n", userEmail)
 	fmt.Println()
 }
 

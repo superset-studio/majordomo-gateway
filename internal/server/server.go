@@ -56,6 +56,11 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 	if adminCfg != nil && adminCfg.AdminHandler != nil && adminCfg.JWTService != nil {
 		router.Route("/api/v1/admin", func(r chi.Router) {
 			r.Post("/login", adminCfg.AdminHandler.Login)
+			r.Post("/signup", adminCfg.AdminHandler.Signup)
+			r.Post("/email/verify", adminCfg.AdminHandler.VerifyEmail)
+			r.Post("/email/verify/resend", adminCfg.AdminHandler.ResendVerification)
+			r.Post("/password/reset-request", adminCfg.AdminHandler.RequestPasswordReset)
+			r.Post("/password/reset", adminCfg.AdminHandler.ResetPassword)
 
 			if adminCfg.OrgHandler != nil {
 				r.Post("/orgs/signup", adminCfg.OrgHandler.OrgSignup)

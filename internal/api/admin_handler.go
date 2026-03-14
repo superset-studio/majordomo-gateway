@@ -1,49 +1,168 @@
 package api
 
 import (
-	"encoding/json"
-	"log/slog"
-	"net/http"
+    "encoding/json"
+    "log/slog"
+    "net/http"
+    "strings"
+    "time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/superset-studio/majordomo-gateway/internal/auth"
-	"github.com/superset-studio/majordomo-gateway/internal/httputil"
-	"github.com/superset-studio/majordomo-gateway/internal/models"
-	"github.com/superset-studio/majordomo-gateway/internal/secrets"
-	"github.com/superset-studio/majordomo-gateway/internal/storage"
-	"golang.org/x/crypto/bcrypt"
+    "github.com/go-chi/chi/v5"
+    "github.com/google/uuid"
+    "github.com/superset-studio/majordomo-gateway/internal/auth"
+    "github.com/superset-studio/majordomo-gateway/internal/httputil"
+    "github.com/superset-studio/majordomo-gateway/internal/models"
+    "github.com/superset-studio/majordomo-gateway/internal/secrets"
+    "github.com/superset-studio/majordomo-gateway/internal/storage"
+    "golang.org/x/crypto/bcrypt"
 )
+
+
 
 // AdminHandler provides REST API endpoints for the admin web UI.
 type AdminHandler struct {
-	apiKeys     storage.APIKeyStorage
-	proxyKeys   storage.ProxyKeyStorage
-	users       storage.UserStorage
-	orgs        storage.OrganizationStorage
-	secrets     secrets.SecretStore
-	jwt         *auth.JWTService
-	proxyKeySvc *ProxyKeyService
+    apiKeys     storage.APIKeyStorage
+    proxyKeys   storage.ProxyKeyStorage
+    users       storage.UserStorage
+    orgs        storage.OrganizationStorage
+    secrets     secrets.SecretStore
+    jwt         *auth.JWTService
+    proxyKeySvc *ProxyKeyService
+    pwdResets   storage.PasswordResetStorage
+    emailVerify storage.EmailVerificationStorage
+    email       EmailSender
+    frontendURL string
 }
 
 // NewAdminHandler creates a new admin API handler.
 func NewAdminHandler(
-	apiKeys storage.APIKeyStorage,
-	proxyKeys storage.ProxyKeyStorage,
-	users storage.UserStorage,
-	orgs storage.OrganizationStorage,
-	secretStore secrets.SecretStore,
-	jwtSvc *auth.JWTService,
+    apiKeys storage.APIKeyStorage,
+    proxyKeys storage.ProxyKeyStorage,
+    users storage.UserStorage,
+    orgs storage.OrganizationStorage,
+    secretStore secrets.SecretStore,
+    jwtSvc *auth.JWTService,
+    pwdResets storage.PasswordResetStorage,
+    emailVerify storage.EmailVerificationStorage,
+    email EmailSender,
+    frontendURL string,
 ) *AdminHandler {
-	return &AdminHandler{
-		apiKeys:     apiKeys,
-		proxyKeys:   proxyKeys,
-		users:       users,
-		orgs:        orgs,
-		secrets:     secretStore,
-		jwt:         jwtSvc,
-		proxyKeySvc: NewProxyKeyService(proxyKeys, secretStore),
-	}
+    return &AdminHandler{
+        apiKeys:     apiKeys,
+        proxyKeys:   proxyKeys,
+        users:       users,
+        orgs:        orgs,
+        secrets:     secretStore,
+        jwt:         jwtSvc,
+        proxyKeySvc: NewProxyKeyService(proxyKeys, secretStore),
+        pwdResets:   pwdResets,
+        emailVerify: emailVerify,
+        email:       email,
+        frontendURL: strings.TrimRight(frontendURL, "/"),
+    }
+}
+
+// --- Password reset ---
+
+type resetRequest struct {
+    Username string `json:"username"`
+    Email    string `json:"email"`
+}
+
+// RequestPasswordReset handles POST /api/v1/admin/password/reset-request
+// Always returns 200 to prevent user enumeration.
+func (h *AdminHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+    if h.pwdResets == nil {
+        httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+        return
+    }
+    var req resetRequest
+    _ = json.NewDecoder(r.Body).Decode(&req)
+
+    // Find user by username or email
+    var user *models.User
+    var err error
+    if req.Username != "" {
+        user, err = h.users.GetUserByUsername(r.Context(), req.Username)
+    } else if req.Email != "" {
+        user, err = h.users.GetUserByEmail(r.Context(), req.Email)
+    }
+    if err != nil {
+        slog.Error("password reset lookup failed", "error", err)
+        // Return OK regardless
+        httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+        return
+    }
+    if user == nil || user.PasswordHash == nil {
+        // OAuth-only or missing user: still pretend success
+        httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+        return
+    }
+
+    // Create token valid for 1 hour
+    token, err := randomHex(24)
+    if err != nil {
+        slog.Error("failed to generate reset token", "error", err)
+        httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+        return
+    }
+    expires := time.Now().Add(1 * time.Hour)
+    if _, err := h.pwdResets.CreatePasswordResetToken(r.Context(), user.ID, token, expires); err != nil {
+        slog.Error("failed to create password reset token", "error", err)
+        // Still return OK to avoid enumeration
+        httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+        return
+    }
+    resetURL := h.frontendURL + "/reset-password/" + token
+    sendTo := req.Email
+    if sendTo == "" && user.Email != nil {
+        sendTo = *user.Email
+    }
+    if h.email != nil && sendTo != "" {
+        if err := h.email.SendReset(sendTo, resetURL); err != nil {
+            slog.Error("failed to send password reset email", "error", err)
+        }
+    } else {
+        slog.Info("password reset token created (no email)", "user", user.Username, "token", token)
+    }
+    httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type resetPasswordRequest struct {
+    Token       string `json:"token"`
+    NewPassword string `json:"new_password"`
+}
+
+// ResetPassword handles POST /api/v1/admin/password/reset
+func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+    if h.pwdResets == nil {
+        httputil.WriteJSONError(w, http.StatusBadRequest, "password reset not supported")
+        return
+    }
+    var req resetPasswordRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" || req.NewPassword == "" {
+        httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+        return
+    }
+    pr, err := h.pwdResets.GetPasswordResetByToken(r.Context(), req.Token)
+    if err != nil || pr == nil || pr.UsedAt != nil || time.Now().After(pr.ExpiresAt) {
+        httputil.WriteJSONError(w, http.StatusBadRequest, "invalid or expired token")
+        return
+    }
+
+    newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
+    if err != nil {
+        slog.Error("failed to hash password", "error", err)
+        httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+        return
+    }
+    if err := h.users.UpdateUserPassword(r.Context(), pr.UserID, string(newHash)); err != nil {
+        slog.Error("failed to update password", "error", err)
+        httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+        return
+    }
+    _ = h.pwdResets.MarkPasswordResetUsed(r.Context(), pr.ID)
+    httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // --- Login ---
@@ -68,15 +187,25 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Username == "" || req.Password == "" {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "username and password are required")
+		httputil.WriteJSONError(w, http.StatusBadRequest, "email and password are required")
 		return
 	}
 
+	// Try lookup by username first (which is the email for new accounts),
+	// then fall back to email lookup for backwards compatibility.
 	user, err := h.users.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
 		slog.Error("failed to get user", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if user == nil && strings.Contains(req.Username, "@") {
+		user, err = h.users.GetUserByEmail(r.Context(), req.Username)
+		if err != nil {
+			slog.Error("failed to get user by email", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 	}
 
 	if user == nil || !user.IsActive {
@@ -91,6 +220,11 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.Password)); err != nil {
 		httputil.WriteJSONError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	if !user.EmailVerified {
+		httputil.WriteJSONError(w, http.StatusForbidden, "please verify your email before signing in")
 		return
 	}
 
@@ -120,6 +254,131 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, loginResponse{Token: token, User: user, Org: org})
+}
+
+// --- Signup ---
+
+type signupRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// Signup handles POST /api/v1/admin/signup
+func (h *AdminHandler) Signup(w http.ResponseWriter, r *http.Request) {
+	var req signupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Email == "" || !strings.Contains(req.Email, "@") {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "a valid email is required")
+		return
+	}
+	if req.Password == "" || len(req.Password) < 8 {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	existing, err := h.users.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		slog.Error("failed to check existing user", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existing != nil {
+		httputil.WriteJSONError(w, http.StatusConflict, "an account with this email already exists")
+		return
+	}
+
+	user, err := h.users.CreateUser(r.Context(), &models.CreateUserInput{
+		Username: req.Email,
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		slog.Error("failed to create user", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to create account")
+		return
+	}
+
+	h.sendVerificationEmail(r, user.ID, req.Email)
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"status": "ok", "message": "verification email sent"})
+}
+
+// --- Email Verification ---
+
+type verifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+// VerifyEmail handles POST /api/v1/admin/email/verify
+func (h *AdminHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req verifyEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Token == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	vt, err := h.emailVerify.GetEmailVerificationByToken(r.Context(), req.Token)
+	if err != nil || vt == nil || vt.UsedAt != nil || time.Now().After(vt.ExpiresAt) {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid or expired verification link")
+		return
+	}
+
+	if err := h.users.MarkUserEmailVerified(r.Context(), vt.UserID); err != nil {
+		slog.Error("failed to mark email verified", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	_ = h.emailVerify.MarkEmailVerificationUsed(r.Context(), vt.ID)
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type resendVerificationRequest struct {
+	Email string `json:"email"`
+}
+
+// ResendVerification handles POST /api/v1/admin/email/verify/resend
+func (h *AdminHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req resendVerificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" {
+		httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	user, err := h.users.GetUserByEmail(r.Context(), req.Email)
+	if err != nil || user == nil || user.EmailVerified {
+		// Always return 200 to prevent enumeration
+		httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	h.sendVerificationEmail(r, user.ID, req.Email)
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// sendVerificationEmail generates a verification token and sends the email.
+func (h *AdminHandler) sendVerificationEmail(r *http.Request, userID uuid.UUID, email string) {
+	token, err := randomHex(24)
+	if err != nil {
+		slog.Error("failed to generate verification token", "error", err)
+		return
+	}
+	expires := time.Now().Add(24 * time.Hour)
+	if _, err := h.emailVerify.CreateEmailVerificationToken(r.Context(), userID, token, expires); err != nil {
+		slog.Error("failed to create email verification token", "error", err)
+		return
+	}
+	verifyURL := h.frontendURL + "/verify-email/" + token
+	if h.email != nil {
+		if err := h.email.SendVerification(email, verifyURL); err != nil {
+			slog.Error("failed to send verification email", "error", err)
+		}
+	} else {
+		slog.Info("email verification token created (no email sender)", "email", email, "token", token)
+	}
 }
 
 // --- Me ---

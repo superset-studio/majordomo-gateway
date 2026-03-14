@@ -66,3 +66,9 @@ oauth:
   # google:
   #   client_id: ""      # Or set MAJORDOMO_OAUTH_GOOGLE_CLIENT_ID
   #   client_secret: ""  # Or set MAJORDOMO_OAUTH_GOOGLE_CLIENT_SECRET
+
+# Email (optional) — enable password reset emails via Resend
+email:
+  resend_api_key: ""      # Or set MAJORDOMO_EMAIL_RESEND_API_KEY
+  from: ""                # Or set MAJORDOMO_EMAIL_FROM (e.g., "Majordomo <no-reply@yourdomain.com>")
+  frontend_url: ""        # Or set MAJORDOMO_EMAIL_FRONTEND_URL (used to build reset links)

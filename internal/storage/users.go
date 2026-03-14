@@ -14,7 +14,7 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 )
 
-const userColumns = `id, username, password_hash, email, auth_provider, auth_provider_id, is_active, created_at, s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted`
+const userColumns = `id, username, password_hash, email, auth_provider, auth_provider_id, is_active, email_verified, created_at, s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted`
 
 // CreateUser creates a new user with a bcrypt-hashed password
 func (s *PostgresStorage) CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
@@ -24,12 +24,12 @@ func (s *PostgresStorage) CreateUser(ctx context.Context, input *models.CreateUs
 	}
 
 	query := `
-		INSERT INTO users (username, password_hash)
-		VALUES ($1, $2)
+		INSERT INTO users (username, email, password_hash)
+		VALUES ($1, $2, $3)
 		RETURNING ` + userColumns
 
 	var user models.User
-	err = s.db.QueryRowxContext(ctx, query, input.Username, string(hash)).StructScan(&user)
+	err = s.db.QueryRowxContext(ctx, query, input.Username, input.Email, string(hash)).StructScan(&user)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +67,21 @@ func (s *PostgresStorage) GetUserByUsername(ctx context.Context, username string
 	}
 
 	return &user, nil
+}
+
+// GetUserByEmail retrieves a user by their email
+func (s *PostgresStorage) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+    query := `SELECT ` + userColumns + ` FROM users WHERE email = $1`
+
+    var user models.User
+    err := s.db.GetContext(ctx, &user, query, email)
+    if errors.Is(err, sql.ErrNoRows) {
+        return nil, nil
+    }
+    if err != nil {
+        return nil, err
+    }
+    return &user, nil
 }
 
 // GetUserByAuthProvider retrieves a user by their OAuth provider and provider ID
@@ -173,6 +188,23 @@ func (s *PostgresStorage) GetUserS3Config(ctx context.Context, userID uuid.UUID)
 		return nil, err
 	}
 	return &user, nil
+}
+
+// MarkUserEmailVerified sets email_verified = true for a user.
+func (s *PostgresStorage) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE users SET email_verified = true WHERE id = $1`
+	result, err := s.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 // UpdateUserPassword updates a user's password hash

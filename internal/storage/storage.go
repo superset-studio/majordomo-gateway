@@ -30,16 +30,18 @@ type APIKeyStorage interface {
 
 // UserStorage defines the interface for user CRUD operations
 type UserStorage interface {
-	CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
-	GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
-	GetUserByUsername(ctx context.Context, username string) (*models.User, error)
-	GetUserByAuthProvider(ctx context.Context, provider, providerID string) (*models.User, error)
-	CreateOAuthUser(ctx context.Context, input *models.CreateOAuthUserInput) (*models.User, error)
-	ListUsers(ctx context.Context) ([]*models.User, error)
-	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
-	UpdateUserS3Config(ctx context.Context, userID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
-	ClearUserS3Config(ctx context.Context, userID uuid.UUID) error
-	GetUserS3Config(ctx context.Context, userID uuid.UUID) (*models.User, error)
+    CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error)
+    GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
+    GetUserByUsername(ctx context.Context, username string) (*models.User, error)
+    GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+    GetUserByAuthProvider(ctx context.Context, provider, providerID string) (*models.User, error)
+    CreateOAuthUser(ctx context.Context, input *models.CreateOAuthUserInput) (*models.User, error)
+    ListUsers(ctx context.Context) ([]*models.User, error)
+    UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+    UpdateUserS3Config(ctx context.Context, userID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
+    ClearUserS3Config(ctx context.Context, userID uuid.UUID) error
+    GetUserS3Config(ctx context.Context, userID uuid.UUID) (*models.User, error)
+    MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error
 }
 
 // ProxyKeyStorage defines the interface for proxy key CRUD operations
@@ -140,11 +142,25 @@ type ClaudeAnalyticsStorage interface {
 
 // UsageStorage defines the interface for usage reporting queries.
 type UsageStorage interface {
-	GetUsageSummary(ctx context.Context, filter *UsageFilter) (*models.UsageSummary, error)
-	GetDailyUsage(ctx context.Context, filter *UsageFilter) ([]*models.DailyUsage, error)
-	GetModelBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.ModelUsage, error)
-	GetAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.APIKeyUsage, error)
-	ListUsageRequests(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.RequestListItem, int, error)
-	GetMetadataBreakdown(ctx context.Context, filter *UsageFilter, keyName string) ([]*models.MetadataBreakdown, error)
-	GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.RequestLog, error)
+    GetUsageSummary(ctx context.Context, filter *UsageFilter) (*models.UsageSummary, error)
+    GetDailyUsage(ctx context.Context, filter *UsageFilter) ([]*models.DailyUsage, error)
+    GetModelBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.ModelUsage, error)
+    GetAPIKeyBreakdown(ctx context.Context, filter *UsageFilter) ([]*models.APIKeyUsage, error)
+    ListUsageRequests(ctx context.Context, filter *UsageFilter, limit, offset int) ([]*models.RequestListItem, int, error)
+    GetMetadataBreakdown(ctx context.Context, filter *UsageFilter, keyName string) ([]*models.MetadataBreakdown, error)
+    GetRequestDetail(ctx context.Context, requestID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) (*models.RequestLog, error)
+}
+
+// PasswordResetStorage defines operations for password reset tokens.
+type PasswordResetStorage interface {
+    CreatePasswordResetToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) (*models.PasswordResetToken, error)
+    GetPasswordResetByToken(ctx context.Context, token string) (*models.PasswordResetToken, error)
+    MarkPasswordResetUsed(ctx context.Context, id uuid.UUID) error
+}
+
+// EmailVerificationStorage defines operations for email verification tokens.
+type EmailVerificationStorage interface {
+    CreateEmailVerificationToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) (*models.EmailVerificationToken, error)
+    GetEmailVerificationByToken(ctx context.Context, token string) (*models.EmailVerificationToken, error)
+    MarkEmailVerificationUsed(ctx context.Context, id uuid.UUID) error
 }

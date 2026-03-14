@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,10 +20,13 @@ import (
 
 // OrgHandler provides REST API endpoints for organization management.
 type OrgHandler struct {
-	orgs    storage.OrganizationStorage
-	users   storage.UserStorage
-	secrets secrets.SecretStore
-	jwt     *auth.JWTService
+	orgs        storage.OrganizationStorage
+	users       storage.UserStorage
+	secrets     secrets.SecretStore
+	jwt         *auth.JWTService
+	emailVerify storage.EmailVerificationStorage
+	email       EmailSender
+	frontendURL string
 }
 
 // NewOrgHandler creates a new organization handler.
@@ -31,12 +35,18 @@ func NewOrgHandler(
 	users storage.UserStorage,
 	secretStore secrets.SecretStore,
 	jwtSvc *auth.JWTService,
+	emailVerify storage.EmailVerificationStorage,
+	email EmailSender,
+	frontendURL string,
 ) *OrgHandler {
 	return &OrgHandler{
-		orgs:    orgs,
-		users:   users,
-		secrets: secretStore,
-		jwt:     jwtSvc,
+		orgs:        orgs,
+		users:       users,
+		secrets:     secretStore,
+		jwt:         jwtSvc,
+		emailVerify: emailVerify,
+		email:       email,
+		frontendURL: strings.TrimRight(frontendURL, "/"),
 	}
 }
 
@@ -45,15 +55,8 @@ func NewOrgHandler(
 type orgSignupRequest struct {
 	OrgName  string `json:"orgName"`
 	OrgSlug  string `json:"orgSlug"`
-	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
-}
-
-type orgSignupResponse struct {
-	Token string               `json:"token"`
-	User  *models.User         `json:"user"`
-	Org   *models.Organization `json:"org"`
 }
 
 // OrgSignup handles POST /api/v1/admin/orgs/signup
@@ -64,15 +67,25 @@ func (h *OrgHandler) OrgSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.OrgName == "" || req.OrgSlug == "" || req.Username == "" || req.Password == "" {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "orgName, orgSlug, username, and password are required")
+	if req.OrgName == "" || req.OrgSlug == "" || req.Email == "" || req.Password == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "orgName, orgSlug, email, and password are required")
 		return
 	}
 
-	user, org, err := h.orgs.CreateOrganizationWithUser(
+	if !strings.Contains(req.Email, "@") {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "a valid email is required")
+		return
+	}
+
+	if len(req.Password) < 8 {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	user, _, err := h.orgs.CreateOrganizationWithUser(
 		r.Context(),
 		&models.CreateOrganizationInput{Name: req.OrgName, Slug: req.OrgSlug},
-		&models.CreateUserInput{Username: req.Username, Password: req.Password},
+		&models.CreateUserInput{Username: req.Email, Email: req.Email, Password: req.Password},
 	)
 	if err != nil {
 		slog.Error("failed to create org with user", "error", err)
@@ -80,15 +93,32 @@ func (h *OrgHandler) OrgSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role := "admin"
-	token, err := h.jwt.GenerateToken(user.ID, user.Username, &org.ID, &role)
+	// Send verification email
+	h.sendVerificationEmail(r, user.ID, req.Email)
+
+	httputil.WriteJSON(w, http.StatusCreated, map[string]string{"status": "ok", "message": "verification email sent"})
+}
+
+// sendVerificationEmail generates a verification token and sends the email.
+func (h *OrgHandler) sendVerificationEmail(r *http.Request, userID uuid.UUID, email string) {
+	token, err := randomHex(24)
 	if err != nil {
-		slog.Error("failed to generate token", "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		slog.Error("failed to generate verification token", "error", err)
 		return
 	}
-
-	httputil.WriteJSON(w, http.StatusCreated, orgSignupResponse{Token: token, User: user, Org: org})
+	expires := time.Now().Add(24 * time.Hour)
+	if _, err := h.emailVerify.CreateEmailVerificationToken(r.Context(), userID, token, expires); err != nil {
+		slog.Error("failed to create email verification token", "error", err)
+		return
+	}
+	verifyURL := h.frontendURL + "/verify-email/" + token
+	if h.email != nil {
+		if err := h.email.SendVerification(email, verifyURL); err != nil {
+			slog.Error("failed to send verification email", "error", err)
+		}
+	} else {
+		slog.Info("email verification token created (no email sender)", "email", email, "token", token)
+	}
 }
 
 // --- Org CRUD ---

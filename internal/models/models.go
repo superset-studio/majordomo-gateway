@@ -15,6 +15,7 @@ type User struct {
 	AuthProvider   *string   `json:"auth_provider,omitempty" db:"auth_provider"`
 	AuthProviderID *string   `json:"-" db:"auth_provider_id"`
 	IsActive       bool      `json:"is_active" db:"is_active"`
+	EmailVerified  bool      `json:"email_verified" db:"email_verified"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 
 	// Per-user S3 body storage configuration
@@ -37,15 +38,36 @@ type UserS3Config struct {
 // CreateUserInput contains fields for creating a new user
 type CreateUserInput struct {
 	Username string
+	Email    string
 	Password string
 }
 
 // CreateOAuthUserInput contains fields for creating a new OAuth user
 type CreateOAuthUserInput struct {
-	Username       string
-	Email          *string
-	AuthProvider   string
-	AuthProviderID string
+    Username       string
+    Email          *string
+    AuthProvider   string
+    AuthProviderID string
+}
+
+// PasswordResetToken represents a single-use token to reset a password
+type PasswordResetToken struct {
+    ID        uuid.UUID `json:"id" db:"id"`
+    UserID    uuid.UUID `json:"user_id" db:"user_id"`
+    Token     string    `json:"token" db:"token"`
+    ExpiresAt time.Time `json:"expires_at" db:"expires_at"`
+    UsedAt    *time.Time `json:"used_at" db:"used_at"`
+    CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+// EmailVerificationToken represents a single-use token to verify a user's email
+type EmailVerificationToken struct {
+    ID        uuid.UUID  `json:"id" db:"id"`
+    UserID    uuid.UUID  `json:"user_id" db:"user_id"`
+    Token     string     `json:"token" db:"token"`
+    ExpiresAt time.Time  `json:"expires_at" db:"expires_at"`
+    UsedAt    *time.Time `json:"used_at" db:"used_at"`
+    CreatedAt time.Time  `json:"created_at" db:"created_at"`
 }
 
 // APIKey represents a Majordomo API key stored in the database

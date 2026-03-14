@@ -9,17 +9,18 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
-	Pricing   PricingConfig   `mapstructure:"pricing"`
-	Providers ProvidersConfig `mapstructure:"providers"`
-	S3        S3Config        `mapstructure:"s3"`
-	Metadata  MetadataConfig  `mapstructure:"metadata"`
-	Secrets   SecretsConfig   `mapstructure:"secrets"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	CORS      CORSConfig      `mapstructure:"cors"`
-	OAuth     OAuthConfig     `mapstructure:"oauth"`
+    Server    ServerConfig    `mapstructure:"server"`
+    Storage   StorageConfig   `mapstructure:"storage"`
+    Logging   LoggingConfig   `mapstructure:"logging"`
+    Pricing   PricingConfig   `mapstructure:"pricing"`
+    Providers ProvidersConfig `mapstructure:"providers"`
+    S3        S3Config        `mapstructure:"s3"`
+    Metadata  MetadataConfig  `mapstructure:"metadata"`
+    Secrets   SecretsConfig   `mapstructure:"secrets"`
+    JWT       JWTConfig       `mapstructure:"jwt"`
+    CORS      CORSConfig      `mapstructure:"cors"`
+    OAuth     OAuthConfig     `mapstructure:"oauth"`
+    Email     EmailConfig     `mapstructure:"email"`
 }
 
 type OAuthConfig struct {
@@ -128,11 +129,17 @@ type PricingConfig struct {
 }
 
 type ProvidersConfig struct {
-	OpenAI    ProviderConfig `mapstructure:"openai"`
-	Anthropic ProviderConfig `mapstructure:"anthropic"`
-	Gemini    ProviderConfig `mapstructure:"gemini"`
-	Azure     ProviderConfig `mapstructure:"azure"`
-	Bedrock   BedrockConfig  `mapstructure:"bedrock"`
+    OpenAI    ProviderConfig `mapstructure:"openai"`
+    Anthropic ProviderConfig `mapstructure:"anthropic"`
+    Gemini    ProviderConfig `mapstructure:"gemini"`
+    Azure     ProviderConfig `mapstructure:"azure"`
+    Bedrock   BedrockConfig  `mapstructure:"bedrock"`
+}
+
+type EmailConfig struct {
+    ResendAPIKey string `mapstructure:"resend_api_key"`
+    From         string `mapstructure:"from"`
+    FrontendURL  string `mapstructure:"frontend_url"`
 }
 
 type ProviderConfig struct {
@@ -229,6 +236,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("oauth.github.client_id", "")
 	v.SetDefault("oauth.github.client_secret", "")
 	v.SetDefault("oauth.google.client_id", "")
-	v.SetDefault("oauth.google.client_secret", "")
-	v.SetDefault("oauth.frontend_url", "")
+    v.SetDefault("oauth.google.client_secret", "")
+    v.SetDefault("oauth.frontend_url", "")
+
+    v.SetDefault("email.resend_api_key", "")
+    v.SetDefault("email.from", "")
+    v.SetDefault("email.frontend_url", "")
 }

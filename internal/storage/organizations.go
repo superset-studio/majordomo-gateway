@@ -44,9 +44,9 @@ func (s *PostgresStorage) CreateOrganizationWithUser(ctx context.Context, orgInp
 
 	var user models.User
 	err = tx.QueryRowxContext(ctx, `
-		INSERT INTO users (username, password_hash)
-		VALUES ($1, $2)
-		RETURNING `+userColumns, userInput.Username, string(hash)).StructScan(&user)
+		INSERT INTO users (username, email, password_hash)
+		VALUES ($1, $2, $3)
+		RETURNING `+userColumns, userInput.Username, userInput.Email, string(hash)).StructScan(&user)
 	if err != nil {
 		return nil, nil, fmt.Errorf("insert user: %w", err)
 	}

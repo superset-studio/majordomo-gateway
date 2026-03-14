@@ -13,6 +13,7 @@ import (
 
 	"github.com/superset-studio/majordomo-gateway/internal/api"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
+	apiemail "github.com/superset-studio/majordomo-gateway/internal/email"
 	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
@@ -155,13 +156,26 @@ func runServe(args []string) {
 			}
 		}
 
-		adminHandler := api.NewAdminHandler(store, store, store, store, adminSecretStore, jwtSvc)
+		// Email sender and frontend URL for password reset links
+		var emailSender api.EmailSender
+		frontendURL := cfg.Email.FrontendURL
+		if frontendURL == "" {
+			frontendURL = cfg.OAuth.FrontendURL
+			if frontendURL == "" {
+				frontendURL = cfg.Server.BaseURL
+			}
+		}
+		if cfg.Email.ResendAPIKey != "" && cfg.Email.From != "" {
+			emailSender = apiemail.NewResendSender(cfg.Email.ResendAPIKey, cfg.Email.From)
+		}
+
+		adminHandler := api.NewAdminHandler(store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
 		usageHandler = api.NewUsageHandler(store, store)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		var orgHandler *api.OrgHandler
 		if adminSecretStore != nil {
-			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc)
+			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc, store, emailSender, frontendURL)
 		}
 
 		adminCfg = &server.AdminConfig{

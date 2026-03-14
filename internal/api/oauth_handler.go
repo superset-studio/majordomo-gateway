@@ -247,6 +247,9 @@ func (h *OAuthHandler) findOrCreateOAuthUser(r *http.Request, provider, provider
 		}
 	}
 
+	// Auto-verify OAuth users
+	_ = h.users.MarkUserEmailVerified(ctx, user.ID)
+
 	// Auto-accept pending invites for this email
 	if h.orgs != nil && email != "" {
 		invites, err := h.orgs.ListInvitesByEmail(ctx, email)
