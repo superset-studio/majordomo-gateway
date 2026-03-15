@@ -17,6 +17,7 @@ storage:
     max_conns: 20
 
 logging:
+  level: "info"  # "debug", "info", "warn", "error"
   store_request_body: false
   store_response_body: false
   max_body_size: 65536  # Only used for postgres storage

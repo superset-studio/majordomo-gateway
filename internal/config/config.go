@@ -82,6 +82,7 @@ func (p *PostgresConfig) DSN() string {
 }
 
 type LoggingConfig struct {
+	Level               string `mapstructure:"level"` // "debug", "info", "warn", "error"
 	StoreRequestBody    bool   `mapstructure:"store_request_body"`
 	StoreResponseBody   bool   `mapstructure:"store_response_body"`
 	MaxBodySize         int    `mapstructure:"max_body_size"`          // Legacy fallback
@@ -199,6 +200,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.postgres.sslmode", "disable")
 	v.SetDefault("storage.postgres.max_conns", 20)
 
+	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.store_request_body", false)
 	v.SetDefault("logging.store_response_body", false)
 	v.SetDefault("logging.max_body_size", 65536)

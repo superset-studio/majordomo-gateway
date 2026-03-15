@@ -486,6 +486,7 @@ func (h *Handler) getUserS3Config(ctx context.Context, userID uuid.UUID) *models
 	}
 
 	if h.userStore == nil || h.secretStore == nil {
+		slog.Debug("skipping user S3 config: missing dependency", "user_id", userID, "userStore_nil", h.userStore == nil, "secretStore_nil", h.secretStore == nil)
 		return nil
 	}
 
@@ -497,6 +498,7 @@ func (h *Handler) getUserS3Config(ctx context.Context, userID uuid.UUID) *models
 	}
 
 	if user.S3Bucket == nil || *user.S3Bucket == "" || user.S3AccessKeyIDEncrypted == nil || user.S3SecretAccessKeyEncrypted == nil {
+		slog.Debug("user S3 config incomplete", "user_id", userID, "bucket_nil", user.S3Bucket == nil, "creds_nil", user.S3AccessKeyIDEncrypted == nil)
 		h.userS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
 		return nil
 	}
