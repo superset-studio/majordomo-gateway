@@ -219,7 +219,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine if this is a Claude Code request
 	isClaudeCode := r.Header.Get("X-Majordomo-Client") == "claude-code" || sessionID != nil
 
-	go h.logRequest(ctx, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
