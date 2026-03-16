@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -71,7 +72,7 @@ func NewHandler(
 	}
 
 	return &Handler{
-		upstream:       NewUpstreamClient(cfg.Server.UpstreamTimeout),
+		upstream:       NewUpstreamClient(cfg.Server.UpstreamTimeout, cfg.Server.StreamHeaderTimeout),
 		storage:        store,
 		s3Storage:      s3Storage,
 		userS3Storage:  userS3Storage,
@@ -161,20 +162,100 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := h.upstream.Forward(ctx, baseURL, r, upstreamBody)
-	if err != nil {
-		slog.Error("upstream request failed", "error", err, "request_id", requestID)
-		httputil.WriteJSONError(w, http.StatusBadGateway, "upstream request failed")
-		return
-	}
+	// Decide whether to use the streaming path.
+	// Translation requires the full body up-front, so always buffer those.
+	useStreaming := !provider.IsTranslationRequired(providerInfo.Provider)
 
-	// Translate response back if needed (e.g., Anthropic format → OpenAI format)
-	if provider.IsTranslationRequired(providerInfo.Provider) && resp.StatusCode < 400 {
-		translated, err := provider.TranslateAnthropicToOpenAI(resp.Body, "")
+	var resp *UpstreamResponse
+	if useStreaming {
+		streamResp, err := h.upstream.ForwardStream(ctx, baseURL, r, upstreamBody)
 		if err != nil {
-			slog.Warn("response translation failed, returning as-is", "error", err, "request_id", requestID)
-		} else {
-			resp.Body = translated
+			slog.Error("upstream request failed", "error", err, "request_id", requestID)
+			httputil.WriteJSONError(w, http.StatusBadGateway, "upstream request failed")
+			return
+		}
+
+		isSSE := strings.Contains(streamResp.Headers.Get("Content-Type"), "text/event-stream")
+
+		if isSSE {
+			// --- Streaming SSE path ---
+
+			// Disable the server's write deadline for this connection so
+			// long-running streams are not killed.
+			rc := http.NewResponseController(w)
+			if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+				slog.Debug("failed to clear write deadline", "error", err)
+			}
+
+			// Copy response headers (skip hop-by-hop / Content-Encoding).
+			copyResponseHeaders(streamResp.Headers, w.Header())
+			w.WriteHeader(streamResp.StatusCode)
+
+			// Flush headers immediately so the client sees them.
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+
+			// Tee the stream: relay to client while capturing for logging.
+			var buf bytes.Buffer
+			tee := io.TeeReader(streamResp.Body, &buf)
+
+			// Stream chunks to client, flushing after each io.Copy chunk.
+			flushWriter := newFlushWriter(w)
+			_, copyErr := io.Copy(flushWriter, tee)
+			streamResp.Body.Close()
+
+			if copyErr != nil {
+				slog.Warn("error streaming response to client", "error", copyErr, "request_id", requestID)
+			}
+
+			respondedAt := time.Now()
+
+			// Build an UpstreamResponse from the buffered data for logging.
+			resp = &UpstreamResponse{
+				StatusCode:   streamResp.StatusCode,
+				Headers:      streamResp.Headers,
+				Body:         buf.Bytes(),
+				ResponseTime: streamResp.ResponseTime,
+			}
+
+			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+			return
+		}
+
+		// Non-SSE response received via streaming client — buffer the rest.
+		respBody, err := io.ReadAll(streamResp.Body)
+		streamResp.Body.Close()
+		if err != nil {
+			slog.Error("failed to read upstream response", "error", err, "request_id", requestID)
+			httputil.WriteJSONError(w, http.StatusBadGateway, "upstream request failed")
+			return
+		}
+
+		resp = &UpstreamResponse{
+			StatusCode:   streamResp.StatusCode,
+			Headers:      streamResp.Headers,
+			Body:         respBody,
+			ResponseTime: streamResp.ResponseTime,
+		}
+	} else {
+		// Buffered path (translation required).
+		var err error
+		resp, err = h.upstream.Forward(ctx, baseURL, r, upstreamBody)
+		if err != nil {
+			slog.Error("upstream request failed", "error", err, "request_id", requestID)
+			httputil.WriteJSONError(w, http.StatusBadGateway, "upstream request failed")
+			return
+		}
+
+		// Translate response back (e.g., Anthropic format → OpenAI format)
+		if resp.StatusCode < 400 {
+			translated, err := provider.TranslateAnthropicToOpenAI(resp.Body, "")
+			if err != nil {
+				slog.Warn("response translation failed, returning as-is", "error", err, "request_id", requestID)
+			} else {
+				resp.Body = translated
+			}
 		}
 	}
 
@@ -183,12 +264,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Copy response headers, filtering out hop-by-hop and Content-Encoding
 	copyResponseHeaders(resp.Headers, w.Header())
 
-	// Check if we should compress the response for the client
+	// Check if we should compress the response for the client.
+	// Skip compression for SSE — it defeats streaming (already handled above).
 	acceptEncoding := r.Header.Get("Accept-Encoding")
 	contentType := resp.Headers.Get("Content-Type")
 	responseBody := resp.Body
 
-	if ShouldCompress(acceptEncoding, contentType, len(resp.Body)) {
+	if !strings.Contains(contentType, "text/event-stream") && ShouldCompress(acceptEncoding, contentType, len(resp.Body)) {
 		compressed, err := GzipCompress(resp.Body)
 		if err != nil {
 			slog.Warn("failed to compress response, sending uncompressed", "error", err, "request_id", requestID)
@@ -202,6 +284,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
+	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+}
+
+// logAndFinish extracts session metadata from request headers and dispatches
+// the async log. Shared by both the buffered and streaming paths.
+func (h *Handler) logAndFinish(
+	r *http.Request,
+	requestID uuid.UUID,
+	apiKeyInfo *models.APIKeyInfo,
+	providerKeyInfo *ProviderKeyInfo,
+	proxyKeyID *uuid.UUID,
+	providerInfo provider.ProviderInfo,
+	reqBody []byte,
+	resp *UpstreamResponse,
+	requestedAt, respondedAt time.Time,
+	headers map[string]string,
+) {
 	// Extract Claude Code session ID if present
 	var sessionID *uuid.UUID
 	if sid := r.Header.Get("X-Majordomo-ClaudeCode-Session-Id"); sid != "" {
@@ -219,7 +318,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Determine if this is a Claude Code request
 	isClaudeCode := r.Header.Get("X-Majordomo-Client") == "claude-code" || sessionID != nil
 
-	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, body, resp, requestedAt, respondedAt, headers)
+	go h.logRequest(context.Background(), requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, sessionID, sessionName, isClaudeCode, providerInfo, r, reqBody, resp, requestedAt, respondedAt, headers)
 }
 
 func (h *Handler) logRequest(
@@ -614,4 +713,25 @@ func truncateBody(body string, maxSize int) string {
 		return body
 	}
 	return body[:maxSize]
+}
+
+// flushWriter wraps an http.ResponseWriter and flushes after every Write
+// if the underlying writer supports http.Flusher. This ensures SSE chunks
+// are delivered to the client immediately.
+type flushWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
+
+func newFlushWriter(w http.ResponseWriter) *flushWriter {
+	f, _ := w.(http.Flusher)
+	return &flushWriter{w: w, flusher: f}
+}
+
+func (fw *flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	if fw.flusher != nil {
+		fw.flusher.Flush()
+	}
+	return n, err
 }

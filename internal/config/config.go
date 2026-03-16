@@ -53,12 +53,13 @@ type MetadataConfig struct {
 }
 
 type ServerConfig struct {
-	Host            string        `mapstructure:"host"`
-	Port            int           `mapstructure:"port"`
-	BaseURL         string        `mapstructure:"base_url"`
-	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
-	UpstreamTimeout time.Duration `mapstructure:"upstream_timeout"`
+	Host                  string        `mapstructure:"host"`
+	Port                  int           `mapstructure:"port"`
+	BaseURL               string        `mapstructure:"base_url"`
+	ReadTimeout           time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout          time.Duration `mapstructure:"write_timeout"`
+	UpstreamTimeout       time.Duration `mapstructure:"upstream_timeout"`
+	StreamHeaderTimeout   time.Duration `mapstructure:"stream_header_timeout"`
 }
 
 type StorageConfig struct {
@@ -188,8 +189,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.base_url", "")
 	v.SetDefault("server.read_timeout", 30*time.Second)
-	v.SetDefault("server.write_timeout", 120*time.Second)
-	v.SetDefault("server.upstream_timeout", 120*time.Second)
+	v.SetDefault("server.write_timeout", 600*time.Second)
+	v.SetDefault("server.upstream_timeout", 600*time.Second)
+	v.SetDefault("server.stream_header_timeout", 0) // 0 = use upstream_timeout
 
 	v.SetDefault("storage.driver", "postgres")
 	v.SetDefault("storage.postgres.host", "localhost")
