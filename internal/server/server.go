@@ -100,6 +100,7 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 					r.Post("/usage/api-keys", usageHandler.GetAPIKeyBreakdown)
 					r.Post("/usage/requests", usageHandler.ListRequests)
 					r.Get("/usage/requests/{id}", usageHandler.GetRequestDetail)
+					r.Get("/usage/requests/{id}/body", usageHandler.GetRequestBody)
 					r.Post("/usage/metadata/{keyName}", usageHandler.GetMetadataBreakdown)
 				}
 

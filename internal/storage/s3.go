@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -190,16 +191,9 @@ func (s *S3BodyStorage) Upload(upload *BodyUpload) {
 	}
 }
 
-// GenerateKey creates an S3 key for storing request/response bodies.
-// The keyPrefix is typically the Majordomo API key ID (first 16 chars used).
-func (s *S3BodyStorage) GenerateKey(keyPrefix string, requestID uuid.UUID, timestamp time.Time) string {
-	date := timestamp.UTC().Format("2006-01-02")
-	// Use first 16 characters of prefix for S3 organization
-	prefix := keyPrefix
-	if len(prefix) > 16 {
-		prefix = prefix[:16]
-	}
-	return fmt.Sprintf("%s/%s/%s.json.gz", prefix, date, requestID.String())
+// Download fetches and decompresses an S3 body by key.
+func (s *S3BodyStorage) Download(ctx context.Context, key string) (*S3BodyContent, error) {
+	return downloadS3Body(ctx, s.client, s.bucket, key)
 }
 
 func (s *S3BodyStorage) Close() error {
@@ -216,4 +210,39 @@ func ExtractResponseHeaders(h http.Header) map[string]string {
 		}
 	}
 	return result
+}
+
+// downloadS3Body fetches a gzipped JSON body from S3 and returns the parsed content.
+func downloadS3Body(ctx context.Context, client *s3.Client, bucket, key string) (*S3BodyContent, error) {
+	out, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3 GetObject %s/%s: %w", bucket, key, err)
+	}
+	defer out.Body.Close()
+
+	compressed, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading s3 body: %w", err)
+	}
+
+	gz, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	decompressed, err := io.ReadAll(gz)
+	if err != nil {
+		return nil, fmt.Errorf("gzip decompress: %w", err)
+	}
+
+	var content S3BodyContent
+	if err := json.Unmarshal(decompressed, &content); err != nil {
+		return nil, fmt.Errorf("unmarshal body content: %w", err)
+	}
+
+	return &content, nil
 }

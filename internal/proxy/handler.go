@@ -409,95 +409,12 @@ func (h *Handler) logRequest(
 		ModelAliasFound: cost.ModelAliasFound,
 	}
 
-	// Per-user S3 body storage — when configured, takes precedence over global body storage.
-	userS3Uploaded := false
-	if apiKeyInfo.UserID != nil && h.userS3Storage != nil {
-		userS3Cfg := h.getUserS3Config(ctx, *apiKeyInfo.UserID)
-		if userS3Cfg != nil {
-			apiKeyName := resolveAPIKeyName(apiKeyInfo)
-			var s3Key string
-			if isClaudeCode && sessionID != nil {
-				s3Key = storage.GenerateUserS3ClaudeCodeKey(apiKeyName, *sessionID, sessionName, requestID, requestedAt)
-			} else {
-				s3Key = storage.GenerateUserS3RequestKey(apiKeyName, requestID, requestedAt)
-			}
-			log.BodyS3Key = &s3Key
-			h.userS3Storage.Upload(ctx, *apiKeyInfo.UserID, userS3Cfg, &storage.BodyUpload{
-				Key:             s3Key,
-				RequestID:       requestID,
-				Timestamp:       requestedAt,
-				RequestMethod:   req.Method,
-				RequestPath:     req.URL.Path,
-				RequestHeaders:  customHeaders,
-				RequestBody:     reqBody,
-				ResponseStatus:  resp.StatusCode,
-				ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
-				ResponseBody:    resp.Body,
-			})
-			userS3Uploaded = true
-		}
-	}
-
-	// Org S3 body storage — when user S3 is not configured and key belongs to an org.
-	orgS3Uploaded := false
-	if !userS3Uploaded && apiKeyInfo.OrgID != nil && h.userS3Storage != nil {
-		orgS3Cfg := h.getOrgS3Config(ctx, *apiKeyInfo.OrgID)
-		if orgS3Cfg != nil {
-			apiKeyName := resolveAPIKeyName(apiKeyInfo)
-			var s3Key string
-			if isClaudeCode && sessionID != nil {
-				s3Key = storage.GenerateUserS3ClaudeCodeKey(apiKeyName, *sessionID, sessionName, requestID, requestedAt)
-			} else {
-				s3Key = storage.GenerateUserS3RequestKey(apiKeyName, requestID, requestedAt)
-			}
-			log.BodyS3Key = &s3Key
-			h.userS3Storage.Upload(ctx, *apiKeyInfo.OrgID, orgS3Cfg, &storage.BodyUpload{
-				Key:             s3Key,
-				RequestID:       requestID,
-				Timestamp:       requestedAt,
-				RequestMethod:   req.Method,
-				RequestPath:     req.URL.Path,
-				RequestHeaders:  customHeaders,
-				RequestBody:     reqBody,
-				ResponseStatus:  resp.StatusCode,
-				ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
-				ResponseBody:    resp.Body,
-			})
-			orgS3Uploaded = true
-		}
-	}
-
-	// Global body storage — skipped when per-user or org S3 handled the upload.
-	if !userS3Uploaded && !orgS3Uploaded {
-		switch h.config.Logging.BodyStorage {
-		case "s3":
-			if h.s3Storage != nil {
-				s3Key := h.s3Storage.GenerateKey(apiKeyInfo.ID.String(), requestID, requestedAt)
-				log.BodyS3Key = &s3Key
-
-				h.s3Storage.Upload(&storage.BodyUpload{
-					Key:             s3Key,
-					RequestID:       requestID,
-					Timestamp:       requestedAt,
-					RequestMethod:   req.Method,
-					RequestPath:     req.URL.Path,
-					RequestHeaders:  customHeaders,
-					RequestBody:     reqBody,
-					ResponseStatus:  resp.StatusCode,
-					ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
-					ResponseBody:    resp.Body,
-				})
-			}
-		case "postgres":
-			if h.config.Logging.StoreRequestBody {
-				body := truncateBody(string(reqBody), h.config.Logging.EffectiveMaxRequestBodySize())
-				log.RequestBody = &body
-			}
-			if h.config.Logging.StoreResponseBody {
-				body := truncateBody(string(resp.Body), h.config.Logging.EffectiveMaxResponseBodySize())
-				log.ResponseBody = &body
-			}
-		}
+	// Body storage: try user/org S3 first, fall back to global storage.
+	// Claude Code request bodies are never stored in global storage for privacy;
+	// they are only stored when the user or org has configured their own S3.
+	uploaded := h.storeBodyToUserOrOrgS3(ctx, log, apiKeyInfo, requestID, requestedAt, req, customHeaders, reqBody, resp)
+	if !uploaded && !isClaudeCode {
+		h.storeBodyToGlobalStorage(log, apiKeyInfo, requestID, requestedAt, req, customHeaders, reqBody, resp)
 	}
 
 	// Attach Claude Code metadata so it's written after the llm_requests INSERT.
@@ -700,12 +617,98 @@ func (h *Handler) getOrgS3Config(ctx context.Context, orgID uuid.UUID) *models.U
 	return cfg
 }
 
-// resolveAPIKeyName returns the API key's display name or a truncated ID.
-func resolveAPIKeyName(info *models.APIKeyInfo) string {
-	if info.Alias != nil {
-		return *info.Alias
+// buildBodyUpload creates a BodyUpload from the common request/response parameters.
+func buildBodyUpload(key string, requestID uuid.UUID, requestedAt time.Time, req *http.Request, customHeaders map[string]string, reqBody []byte, resp *UpstreamResponse) *storage.BodyUpload {
+	return &storage.BodyUpload{
+		Key:             key,
+		RequestID:       requestID,
+		Timestamp:       requestedAt,
+		RequestMethod:   req.Method,
+		RequestPath:     req.URL.Path,
+		RequestHeaders:  customHeaders,
+		RequestBody:     reqBody,
+		ResponseStatus:  resp.StatusCode,
+		ResponseHeaders: storage.ExtractResponseHeaders(resp.Headers),
+		ResponseBody:    resp.Body,
 	}
-	return info.ID.String()[:16]
+}
+
+// storeBodyToUserOrOrgS3 attempts to upload the request/response body to a
+// user-specific or org-specific S3 bucket. Returns true if an upload was fired.
+func (h *Handler) storeBodyToUserOrOrgS3(
+	ctx context.Context,
+	log *models.RequestLog,
+	apiKeyInfo *models.APIKeyInfo,
+	requestID uuid.UUID,
+	requestedAt time.Time,
+	req *http.Request,
+	customHeaders map[string]string,
+	reqBody []byte,
+	resp *UpstreamResponse,
+) bool {
+	if h.userS3Storage == nil {
+		return false
+	}
+
+	// Try user S3 first, then fall back to org S3.
+	type s3Target struct {
+		ownerID uuid.UUID
+		cfg     *models.UserS3Config
+	}
+	var target *s3Target
+
+	if apiKeyInfo.UserID != nil {
+		if cfg := h.getUserS3Config(ctx, *apiKeyInfo.UserID); cfg != nil {
+			target = &s3Target{ownerID: *apiKeyInfo.UserID, cfg: cfg}
+		}
+	}
+	if target == nil && apiKeyInfo.OrgID != nil {
+		if cfg := h.getOrgS3Config(ctx, *apiKeyInfo.OrgID); cfg != nil {
+			target = &s3Target{ownerID: *apiKeyInfo.OrgID, cfg: cfg}
+		}
+	}
+
+	if target == nil {
+		return false
+	}
+
+	s3Key := storage.GenerateS3Key(apiKeyInfo.ID, requestID, requestedAt)
+	log.BodyS3Key = &s3Key
+	upload := buildBodyUpload(s3Key, requestID, requestedAt, req, customHeaders, reqBody, resp)
+	h.userS3Storage.Upload(ctx, target.ownerID, target.cfg, upload)
+	return true
+}
+
+// storeBodyToGlobalStorage stores the request/response body using the globally
+// configured storage backend (S3 or Postgres).
+func (h *Handler) storeBodyToGlobalStorage(
+	log *models.RequestLog,
+	apiKeyInfo *models.APIKeyInfo,
+	requestID uuid.UUID,
+	requestedAt time.Time,
+	req *http.Request,
+	customHeaders map[string]string,
+	reqBody []byte,
+	resp *UpstreamResponse,
+) {
+	switch h.config.Logging.BodyStorage {
+	case "s3":
+		if h.s3Storage != nil {
+			s3Key := storage.GenerateS3Key(apiKeyInfo.ID, requestID, requestedAt)
+			log.BodyS3Key = &s3Key
+			upload := buildBodyUpload(s3Key, requestID, requestedAt, req, customHeaders, reqBody, resp)
+			h.s3Storage.Upload(upload)
+		}
+	case "postgres":
+		if h.config.Logging.StoreRequestBody {
+			body := truncateBody(string(reqBody), h.config.Logging.EffectiveMaxRequestBodySize())
+			log.RequestBody = &body
+		}
+		if h.config.Logging.StoreResponseBody {
+			body := truncateBody(string(resp.Body), h.config.Logging.EffectiveMaxResponseBodySize())
+			log.ResponseBody = &body
+		}
+	}
 }
 
 func truncateBody(body string, maxSize int) string {

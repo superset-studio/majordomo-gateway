@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -8,20 +10,40 @@ import (
 	"github.com/google/uuid"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/httputil"
+	"github.com/superset-studio/majordomo-gateway/internal/models"
+	"github.com/superset-studio/majordomo-gateway/internal/secrets"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
 
 // UsageHandler provides REST API endpoints for usage reporting.
 type UsageHandler struct {
-	usage   storage.UsageStorage
-	apiKeys storage.APIKeyStorage
+	usage        storage.UsageStorage
+	apiKeys      storage.APIKeyStorage
+	userStore    storage.UserStorage
+	orgStore     storage.OrganizationStorage
+	secretStore  secrets.SecretStore
+	s3Storage    *storage.S3BodyStorage
+	userS3       *storage.UserS3Storage
 }
 
 // NewUsageHandler creates a new usage reporting handler.
-func NewUsageHandler(usage storage.UsageStorage, apiKeys storage.APIKeyStorage) *UsageHandler {
+func NewUsageHandler(
+	usage storage.UsageStorage,
+	apiKeys storage.APIKeyStorage,
+	userStore storage.UserStorage,
+	orgStore storage.OrganizationStorage,
+	secretStore secrets.SecretStore,
+	s3Storage *storage.S3BodyStorage,
+	userS3 *storage.UserS3Storage,
+) *UsageHandler {
 	return &UsageHandler{
-		usage:   usage,
-		apiKeys: apiKeys,
+		usage:       usage,
+		apiKeys:     apiKeys,
+		userStore:   userStore,
+		orgStore:    orgStore,
+		secretStore: secretStore,
+		s3Storage:   s3Storage,
+		userS3:      userS3,
 	}
 }
 
@@ -252,6 +274,136 @@ func (h *UsageHandler) GetMetadataBreakdown(w http.ResponseWriter, r *http.Reque
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, breakdown)
+}
+
+// GetRequestBody handles GET /api/v1/admin/usage/requests/{id}/body
+func (h *UsageHandler) GetRequestBody(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request ID")
+		return
+	}
+
+	detail, err := h.usage.GetRequestDetail(r.Context(), id, claims.UserID, claims.OrgID)
+	if err != nil {
+		if err == storage.ErrRequestNotFound {
+			httputil.WriteJSONError(w, http.StatusNotFound, "request not found")
+			return
+		}
+		slog.Error("failed to get request detail", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if detail.BodyS3Key == nil {
+		httputil.WriteJSONError(w, http.StatusNotFound, "no body stored for this request")
+		return
+	}
+
+	content, err := h.downloadBody(r.Context(), detail)
+	if err != nil {
+		slog.Error("failed to download request body from S3", "error", err, "request_id", id, "s3_key", *detail.BodyS3Key)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to retrieve request body")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, content)
+}
+
+// downloadBody resolves the S3 bucket (user → org → global) and downloads the body.
+func (h *UsageHandler) downloadBody(ctx context.Context, detail *models.RequestLog) (*storage.S3BodyContent, error) {
+	key := *detail.BodyS3Key
+
+	// Try user S3.
+	if detail.UserID != nil && h.userS3 != nil && h.secretStore != nil && h.userStore != nil {
+		if cfg := h.resolveUserS3Config(ctx, *detail.UserID); cfg != nil {
+			return h.userS3.Download(ctx, *detail.UserID, cfg, key)
+		}
+	}
+
+	// Try org S3.
+	if detail.OrgID != nil && h.userS3 != nil && h.secretStore != nil && h.orgStore != nil {
+		if cfg := h.resolveOrgS3Config(ctx, *detail.OrgID); cfg != nil {
+			return h.userS3.Download(ctx, *detail.OrgID, cfg, key)
+		}
+	}
+
+	// Fall back to global S3.
+	if h.s3Storage != nil {
+		return h.s3Storage.Download(ctx, key)
+	}
+
+	return nil, fmt.Errorf("no S3 configuration available for request %s", detail.ID)
+}
+
+func (h *UsageHandler) resolveUserS3Config(ctx context.Context, userID uuid.UUID) *models.UserS3Config {
+	user, err := h.userStore.GetUserS3Config(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	if user.S3Bucket == nil || *user.S3Bucket == "" || user.S3AccessKeyIDEncrypted == nil || user.S3SecretAccessKeyEncrypted == nil {
+		return nil
+	}
+	accessKeyID, err := h.secretStore.Decrypt(*user.S3AccessKeyIDEncrypted)
+	if err != nil {
+		slog.Error("failed to decrypt user S3 access key", "error", err, "user_id", userID)
+		return nil
+	}
+	secretKey, err := h.secretStore.Decrypt(*user.S3SecretAccessKeyEncrypted)
+	if err != nil {
+		slog.Error("failed to decrypt user S3 secret key", "error", err, "user_id", userID)
+		return nil
+	}
+	cfg := &models.UserS3Config{
+		Bucket:          *user.S3Bucket,
+		AccessKeyID:     accessKeyID,
+		SecretAccessKey:  secretKey,
+	}
+	if user.S3Region != nil {
+		cfg.Region = *user.S3Region
+	}
+	if user.S3Endpoint != nil {
+		cfg.Endpoint = *user.S3Endpoint
+	}
+	return cfg
+}
+
+func (h *UsageHandler) resolveOrgS3Config(ctx context.Context, orgID uuid.UUID) *models.UserS3Config {
+	org, err := h.orgStore.GetOrgS3Config(ctx, orgID)
+	if err != nil {
+		return nil
+	}
+	if org.S3Bucket == nil || *org.S3Bucket == "" || org.S3AccessKeyIDEncrypted == nil || org.S3SecretAccessKeyEncrypted == nil {
+		return nil
+	}
+	accessKeyID, err := h.secretStore.Decrypt(*org.S3AccessKeyIDEncrypted)
+	if err != nil {
+		slog.Error("failed to decrypt org S3 access key", "error", err, "org_id", orgID)
+		return nil
+	}
+	secretKey, err := h.secretStore.Decrypt(*org.S3SecretAccessKeyEncrypted)
+	if err != nil {
+		slog.Error("failed to decrypt org S3 secret key", "error", err, "org_id", orgID)
+		return nil
+	}
+	cfg := &models.UserS3Config{
+		Bucket:          *org.S3Bucket,
+		AccessKeyID:     accessKeyID,
+		SecretAccessKey:  secretKey,
+	}
+	if org.S3Region != nil {
+		cfg.Region = *org.S3Region
+	}
+	if org.S3Endpoint != nil {
+		cfg.Endpoint = *org.S3Endpoint
+	}
+	return cfg
 }
 
 // verifyAPIKeyOwnership checks that the given API key belongs to the user or their org.

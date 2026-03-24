@@ -72,25 +72,20 @@ func NewUserS3Storage() *UserS3Storage {
 	return &UserS3Storage{}
 }
 
-// GenerateUserS3ClaudeCodeKey creates an S3 key for Claude Code request/response bodies.
-// Format: claude-code/{api-key-name}/{session-dir}/{date}/{requestID}.json.gz
-// If sessionName is provided, session-dir is "{sessionName}-{sessionID}"; otherwise just "{sessionID}".
-func GenerateUserS3ClaudeCodeKey(apiKeyName string, sessionID uuid.UUID, sessionName *string, requestID uuid.UUID, timestamp time.Time) string {
+// GenerateS3Key creates an S3 key for storing request/response bodies.
+// Format: {apiKeyID}/{date}/{requestID}.json.gz
+func GenerateS3Key(apiKeyID uuid.UUID, requestID uuid.UUID, timestamp time.Time) string {
 	date := timestamp.UTC().Format("2006-01-02")
-
-	sessionDir := sessionID.String()
-	if sessionName != nil && *sessionName != "" {
-		sessionDir = *sessionName + "-" + sessionID.String()
-	}
-
-	return fmt.Sprintf("claude-code/%s/%s/%s/%s.json.gz", apiKeyName, sessionDir, date, requestID.String())
+	return fmt.Sprintf("%s/%s/%s.json.gz", apiKeyID.String(), date, requestID.String())
 }
 
-// GenerateUserS3RequestKey creates an S3 key for general LLM request/response bodies.
-// Format: requests/{api-key-name}/{date}/{requestID}.json.gz
-func GenerateUserS3RequestKey(apiKeyName string, requestID uuid.UUID, timestamp time.Time) string {
-	date := timestamp.UTC().Format("2006-01-02")
-	return fmt.Sprintf("requests/%s/%s/%s.json.gz", apiKeyName, date, requestID.String())
+// Download fetches and decompresses an S3 body from the user's bucket.
+func (u *UserS3Storage) Download(ctx context.Context, ownerID uuid.UUID, cfg *models.UserS3Config, key string) (*S3BodyContent, error) {
+	client, err := u.getOrCreateClient(ownerID, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating S3 client for %s: %w", ownerID, err)
+	}
+	return downloadS3Body(ctx, client.client, client.bucket, key)
 }
 
 // Upload uploads a body to the user's S3 bucket asynchronously (fire-and-forget).

@@ -184,7 +184,7 @@ func runServe(args []string) {
 		}
 
 		adminHandler := api.NewAdminHandler(store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
-		usageHandler = api.NewUsageHandler(store, store)
+		usageHandler = api.NewUsageHandler(store, store, store, store, adminSecretStore, s3Storage, userS3Storage)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		var orgHandler *api.OrgHandler
