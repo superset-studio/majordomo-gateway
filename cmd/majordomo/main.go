@@ -159,6 +159,7 @@ func runServe(args []string) {
 	var metadataHandler *api.MetadataHandler
 	var claudeAnalyticsHandler *api.ClaudeAnalyticsHandler
 	var replayHandler *api.ReplayHandler
+	var evalHandler *api.EvalHandler
 	if cfg.JWT.Secret != "" {
 		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
 
@@ -189,6 +190,7 @@ func runServe(args []string) {
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		replayHandler = api.NewReplayHandler(store, store)
+		evalHandler = api.NewEvalHandler(store, store)
 		var orgHandler *api.OrgHandler
 		if adminSecretStore != nil {
 			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc, store, emailSender, frontendURL)
@@ -218,7 +220,7 @@ func runServe(args []string) {
 		slog.Info("admin web UI enabled")
 	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler, claudeAnalyticsHandler, replayHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler, claudeAnalyticsHandler, replayHandler, evalHandler)
 
 	errChan := make(chan error, 1)
 	go func() {

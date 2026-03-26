@@ -34,7 +34,7 @@ type AdminConfig struct {
 	CORSOrigins  []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler, evalHandler *api.EvalHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -131,6 +131,25 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 					r.Post("/replay/runs/{id}/cancel", replayHandler.CancelRun)
 					r.Get("/replay/runs/{id}/results", replayHandler.ListResults)
 					r.Get("/replay/runs/{id}/results/{resultId}", replayHandler.GetResult)
+				}
+
+				if evalHandler != nil {
+					r.Post("/eval/sets", evalHandler.CreateEvalSet)
+					r.Get("/eval/sets", evalHandler.ListEvalSets)
+					r.Get("/eval/sets/{id}", evalHandler.GetEvalSet)
+					r.Put("/eval/sets/{id}", evalHandler.UpdateEvalSet)
+					r.Delete("/eval/sets/{id}", evalHandler.DeleteEvalSet)
+					r.Post("/eval/sets/{id}/items", evalHandler.AddItems)
+					r.Post("/eval/sets/{id}/items/from-filters", evalHandler.AddItemsFromFilters)
+					r.Delete("/eval/sets/{id}/items/{requestId}", evalHandler.RemoveItem)
+					r.Get("/eval/sets/{id}/items", evalHandler.ListItems)
+
+					r.Post("/eval/runs", evalHandler.CreateRun)
+					r.Get("/eval/runs", evalHandler.ListRuns)
+					r.Get("/eval/runs/{id}", evalHandler.GetRun)
+					r.Post("/eval/runs/{id}/cancel", evalHandler.CancelRun)
+					r.Get("/eval/runs/{id}/results", evalHandler.ListResults)
+					r.Get("/eval/runs/{id}/results/{resultId}", evalHandler.GetResult)
 				}
 
 				if adminCfg.OrgHandler != nil {

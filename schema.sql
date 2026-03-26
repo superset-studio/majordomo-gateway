@@ -373,3 +373,106 @@ CREATE TABLE IF NOT EXISTS llm_models (
     UNIQUE (provider_id, model)
 );
 CREATE INDEX IF NOT EXISTS idx_llm_models_provider ON llm_models(provider_id);
+
+-- ============================================================
+-- Eval System
+-- ============================================================
+
+-- Eval Sets: Named, reusable collections of logged request IDs
+CREATE TABLE IF NOT EXISTS eval_sets (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id),
+    org_id      UUID REFERENCES organizations(id),
+    name        VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eval_sets_user ON eval_sets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_sets_org ON eval_sets(org_id, created_at DESC) WHERE org_id IS NOT NULL;
+
+-- Eval Set Items: Junction table linking eval sets to llm_requests
+CREATE TABLE IF NOT EXISTS eval_set_items (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    eval_set_id     UUID NOT NULL REFERENCES eval_sets(id) ON DELETE CASCADE,
+    request_id      UUID NOT NULL REFERENCES llm_requests(id),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (eval_set_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_eval_set_items_set ON eval_set_items(eval_set_id);
+CREATE INDEX IF NOT EXISTS idx_eval_set_items_request ON eval_set_items(request_id);
+
+-- Eval Runs: Job queue for eval execution
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES users(id),
+    org_id                  UUID REFERENCES organizations(id),
+    eval_set_id             UUID NOT NULL REFERENCES eval_sets(id),
+
+    status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+    error_message           TEXT,
+
+    target_provider         VARCHAR(100) NOT NULL,
+    target_model            VARCHAR(100) NOT NULL,
+
+    -- Evaluator configuration: JSON array of LLM judge configs
+    -- [{"name": "accuracy", "prompt": "...", "provider": "anthropic", "model": "...", "scale_min": 1, "scale_max": 5}]
+    evaluators              JSONB NOT NULL DEFAULT '[]',
+
+    -- Summary stats (populated on completion)
+    total_requests          INT,
+    successful_requests     INT,
+    failed_requests         INT,
+    original_total_cost     NUMERIC(12,8),
+    replay_total_cost       NUMERIC(12,8),
+    judge_total_cost        NUMERIC(12,8),
+    original_avg_latency_ms INT,
+    replay_avg_latency_ms   INT,
+    -- Per-evaluator aggregates: [{"name": "accuracy", "avg": 4.2, "min": 1, "max": 5, "count": 50}]
+    evaluator_summary       JSONB,
+
+    started_at              TIMESTAMPTZ,
+    completed_at            TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_user_status ON eval_runs(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_org_status ON eval_runs(org_id, status, created_at DESC) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_eval_runs_pending ON eval_runs(status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_eval_runs_eval_set ON eval_runs(eval_set_id);
+
+-- Eval Results: Per-request result for an eval run
+CREATE TABLE IF NOT EXISTS eval_results (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    eval_run_id             UUID NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+    source_request_id       UUID NOT NULL REFERENCES llm_requests(id),
+
+    original_provider       VARCHAR(100) NOT NULL,
+    original_model          VARCHAR(100) NOT NULL,
+    original_cost           NUMERIC(12,8) NOT NULL,
+    original_latency_ms     INT NOT NULL,
+    original_input_tokens   INT NOT NULL,
+    original_output_tokens  INT NOT NULL,
+
+    replay_response         TEXT,
+    replay_cost             NUMERIC(12,8),
+    replay_latency_ms       INT,
+    replay_input_tokens     INT,
+    replay_output_tokens    INT,
+
+    error_message           TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id, created_at);
+
+-- Eval Result Scores: Per-evaluator score for each eval result
+CREATE TABLE IF NOT EXISTS eval_result_scores (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    eval_result_id  UUID NOT NULL REFERENCES eval_results(id) ON DELETE CASCADE,
+    evaluator_name  VARCHAR(100) NOT NULL,
+    score           NUMERIC(10,4) NOT NULL,
+    reason          TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (eval_result_id, evaluator_name)
+);
+CREATE INDEX IF NOT EXISTS idx_eval_result_scores_result ON eval_result_scores(eval_result_id);
+CREATE INDEX IF NOT EXISTS idx_eval_result_scores_name ON eval_result_scores(evaluator_name);

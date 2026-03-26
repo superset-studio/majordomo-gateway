@@ -148,6 +148,43 @@ type ReplayStorage interface {
 	ListLLMProviders(ctx context.Context) ([]*models.LLMProvider, error)
 }
 
+// EvalSetSourceFilters holds filters for populating an eval set from logged requests.
+type EvalSetSourceFilters struct {
+	APIKeyID *uuid.UUID
+	Provider *string
+	Model    *string
+	Start    *time.Time
+	End      *time.Time
+	Metadata map[string]string
+	Limit    int
+}
+
+// EvalStorage defines the interface for eval set, run, and result operations.
+type EvalStorage interface {
+	// Eval Sets
+	CreateEvalSet(ctx context.Context, set *models.EvalSet) error
+	GetEvalSet(ctx context.Context, id uuid.UUID) (*models.EvalSet, error)
+	ListEvalSets(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, limit, offset int) ([]*models.EvalSet, int, error)
+	UpdateEvalSet(ctx context.Context, id uuid.UUID, name string, description *string) (*models.EvalSet, error)
+	DeleteEvalSet(ctx context.Context, id uuid.UUID) error
+
+	// Eval Set Items
+	AddEvalSetItems(ctx context.Context, evalSetID uuid.UUID, requestIDs []uuid.UUID) (int, error)
+	AddEvalSetItemsFromFilters(ctx context.Context, evalSetID uuid.UUID, userID uuid.UUID, orgID *uuid.UUID, filters *EvalSetSourceFilters) (int, error)
+	RemoveEvalSetItem(ctx context.Context, evalSetID uuid.UUID, requestID uuid.UUID) error
+	ListEvalSetItems(ctx context.Context, evalSetID uuid.UUID, limit, offset int) ([]*models.EvalSetItem, int, error)
+
+	// Eval Runs
+	CreateEvalRun(ctx context.Context, run *models.EvalRun) error
+	GetEvalRun(ctx context.Context, id uuid.UUID) (*models.EvalRun, error)
+	ListEvalRuns(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, limit, offset int) ([]*models.EvalRunListItem, int, error)
+	CancelEvalRun(ctx context.Context, id uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) error
+
+	// Eval Results
+	ListEvalResults(ctx context.Context, runID uuid.UUID, limit, offset int) ([]*models.EvalResult, int, error)
+	GetEvalResult(ctx context.Context, id uuid.UUID) (*models.EvalResult, error)
+}
+
 // ClaudeAnalyticsStorage defines the interface for Claude Code analytics queries.
 type ClaudeAnalyticsStorage interface {
 	GetClaudeSummary(ctx context.Context, filter *UsageFilter) (*models.ClaudeSummary, error)
