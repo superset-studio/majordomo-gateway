@@ -603,6 +603,215 @@ func (h *AdminHandler) DeleteS3Config(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// --- Cloud Storage Config ---
+
+type updateCloudStorageConfigRequest struct {
+	Provider       string `json:"provider"` // "s3" or "gcs"
+	// S3 fields
+	Bucket         string `json:"bucket,omitempty"`
+	Region         string `json:"region,omitempty"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	AccessKeyID    string `json:"accessKeyId,omitempty"`
+	SecretAccessKey string `json:"secretAccessKey,omitempty"`
+	// GCS fields
+	GCSBucket          string `json:"gcsBucket,omitempty"`
+	GCSProjectID       string `json:"gcsProjectId,omitempty"`
+	GCSCredentialsJSON string `json:"gcsCredentialsJson,omitempty"`
+}
+
+type cloudStorageConfigResponse struct {
+	Provider       string `json:"provider"`
+	// S3 fields
+	Bucket         string `json:"bucket,omitempty"`
+	Region         string `json:"region,omitempty"`
+	Endpoint       string `json:"endpoint,omitempty"`
+	CredentialsSet bool   `json:"credentialsSet"`
+	// GCS fields
+	GCSBucket    string `json:"gcsBucket,omitempty"`
+	GCSProjectID string `json:"gcsProjectId,omitempty"`
+}
+
+// GetCloudStorageConfig handles GET /api/v1/admin/me/cloud-storage-config
+func (h *AdminHandler) GetCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	user, err := h.users.GetUserCloudStorageConfig(r.Context(), claims.UserID)
+	if err != nil {
+		slog.Error("failed to get user cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := buildCloudStorageResponse(user.CloudStorageProvider, user.S3Bucket, user.S3Region, user.S3Endpoint, user.S3AccessKeyIDEncrypted, user.GCSBucket, user.GCSProjectID)
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// UpdateCloudStorageConfig handles PUT /api/v1/admin/me/cloud-storage-config
+func (h *AdminHandler) UpdateCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req updateCloudStorageConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Provider != "s3" && req.Provider != "gcs" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider must be 's3' or 'gcs'")
+		return
+	}
+
+	if h.secrets == nil {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
+		return
+	}
+
+	var (
+		s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey string
+		gcsBucket, gcsProjectID, encGCSCredJSON                          string
+	)
+
+	switch req.Provider {
+	case "s3":
+		if req.Bucket == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required for S3")
+			return
+		}
+		if req.AccessKeyID == "" || req.SecretAccessKey == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required for S3")
+			return
+		}
+		s3Region = req.Region
+		if s3Region == "" {
+			s3Region = "us-east-1"
+		}
+		var err error
+		encS3AccessKeyID, err = h.secrets.Encrypt(req.AccessKeyID)
+		if err != nil {
+			slog.Error("failed to encrypt S3 access key ID", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		encS3SecretKey, err = h.secrets.Encrypt(req.SecretAccessKey)
+		if err != nil {
+			slog.Error("failed to encrypt S3 secret access key", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
+			Bucket: req.Bucket, Region: s3Region, Endpoint: req.Endpoint,
+			AccessKeyID: req.AccessKeyID, SecretAccessKey: req.SecretAccessKey,
+		}); err != nil {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
+			return
+		}
+		s3Bucket = req.Bucket
+		s3Endpoint = req.Endpoint
+
+	case "gcs":
+		if req.GCSBucket == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsBucket is required for GCS")
+			return
+		}
+		if req.GCSCredentialsJSON == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsCredentialsJson is required for GCS")
+			return
+		}
+		var err error
+		encGCSCredJSON, err = h.secrets.Encrypt(req.GCSCredentialsJSON)
+		if err != nil {
+			slog.Error("failed to encrypt GCS credentials JSON", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := storage.ValidateGCSConfig(r.Context(), &storage.GCSConfig{
+			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: req.GCSCredentialsJSON,
+		}); err != nil {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "GCS validation failed: "+err.Error())
+			return
+		}
+		gcsBucket = req.GCSBucket
+		gcsProjectID = req.GCSProjectID
+	}
+
+	if err := h.users.UpdateUserCloudStorageConfig(r.Context(), claims.UserID, req.Provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON); err != nil {
+		slog.Error("failed to update user cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := cloudStorageConfigResponse{Provider: req.Provider, CredentialsSet: true}
+	switch req.Provider {
+	case "s3":
+		resp.Bucket = s3Bucket
+		resp.Region = s3Region
+		resp.Endpoint = s3Endpoint
+	case "gcs":
+		resp.GCSBucket = gcsBucket
+		resp.GCSProjectID = gcsProjectID
+	}
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// DeleteCloudStorageConfig handles DELETE /api/v1/admin/me/cloud-storage-config
+func (h *AdminHandler) DeleteCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.users.ClearUserCloudStorageConfig(r.Context(), claims.UserID); err != nil {
+		slog.Error("failed to clear user cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// buildCloudStorageResponse creates a cloudStorageConfigResponse from model fields.
+func buildCloudStorageResponse(provider *string, s3Bucket, s3Region, s3Endpoint, encS3Key *string, gcsBucket, gcsProjectID *string) cloudStorageConfigResponse {
+	resp := cloudStorageConfigResponse{}
+	if provider != nil {
+		resp.Provider = *provider
+	}
+	switch resp.Provider {
+	case "gcs":
+		if gcsBucket != nil {
+			resp.GCSBucket = *gcsBucket
+		}
+		if gcsProjectID != nil {
+			resp.GCSProjectID = *gcsProjectID
+		}
+		resp.CredentialsSet = true
+	default:
+		if s3Bucket != nil {
+			resp.Bucket = *s3Bucket
+		}
+		if s3Region != nil {
+			resp.Region = *s3Region
+		}
+		if s3Endpoint != nil {
+			resp.Endpoint = *s3Endpoint
+		}
+		resp.CredentialsSet = encS3Key != nil && *encS3Key != ""
+		if resp.Bucket == "" {
+			resp.Provider = ""
+			resp.CredentialsSet = false
+		}
+	}
+	return resp
+}
+
 // --- API Keys ---
 
 type adminCreateAPIKeyRequest struct {

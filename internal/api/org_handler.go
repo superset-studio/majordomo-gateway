@@ -576,6 +576,152 @@ func (h *OrgHandler) ClearOrgS3Config(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// --- Cloud Storage Config ---
+
+// GetOrgCloudStorageConfig handles GET /api/v1/admin/orgs/current/cloud-storage-config
+func (h *OrgHandler) GetOrgCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.requireOrgAdmin(w, r)
+	if !ok {
+		return
+	}
+
+	org, err := h.orgs.GetOrgCloudStorageConfig(r.Context(), *claims.OrgID)
+	if err != nil {
+		slog.Error("failed to get org cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := buildCloudStorageResponse(org.CloudStorageProvider, org.S3Bucket, org.S3Region, org.S3Endpoint, org.S3AccessKeyIDEncrypted, org.GCSBucket, org.GCSProjectID)
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// UpdateOrgCloudStorageConfig handles PUT /api/v1/admin/orgs/current/cloud-storage-config
+func (h *OrgHandler) UpdateOrgCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.requireOrgAdmin(w, r)
+	if !ok {
+		return
+	}
+
+	var req updateCloudStorageConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Provider != "s3" && req.Provider != "gcs" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider must be 's3' or 'gcs'")
+		return
+	}
+
+	if h.secrets == nil {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
+		return
+	}
+
+	var (
+		s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey string
+		gcsBucket, gcsProjectID, encGCSCredJSON                          string
+	)
+
+	switch req.Provider {
+	case "s3":
+		if req.Bucket == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required for S3")
+			return
+		}
+		if req.AccessKeyID == "" || req.SecretAccessKey == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required for S3")
+			return
+		}
+		s3Region = req.Region
+		if s3Region == "" {
+			s3Region = "us-east-1"
+		}
+		var err error
+		encS3AccessKeyID, err = h.secrets.Encrypt(req.AccessKeyID)
+		if err != nil {
+			slog.Error("failed to encrypt S3 access key ID", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		encS3SecretKey, err = h.secrets.Encrypt(req.SecretAccessKey)
+		if err != nil {
+			slog.Error("failed to encrypt S3 secret access key", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
+			Bucket: req.Bucket, Region: s3Region, Endpoint: req.Endpoint,
+			AccessKeyID: req.AccessKeyID, SecretAccessKey: req.SecretAccessKey,
+		}); err != nil {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
+			return
+		}
+		s3Bucket = req.Bucket
+		s3Endpoint = req.Endpoint
+
+	case "gcs":
+		if req.GCSBucket == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsBucket is required for GCS")
+			return
+		}
+		if req.GCSCredentialsJSON == "" {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsCredentialsJson is required for GCS")
+			return
+		}
+		var err error
+		encGCSCredJSON, err = h.secrets.Encrypt(req.GCSCredentialsJSON)
+		if err != nil {
+			slog.Error("failed to encrypt GCS credentials JSON", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if err := storage.ValidateGCSConfig(r.Context(), &storage.GCSConfig{
+			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: req.GCSCredentialsJSON,
+		}); err != nil {
+			httputil.WriteJSONError(w, http.StatusBadRequest, "GCS validation failed: "+err.Error())
+			return
+		}
+		gcsBucket = req.GCSBucket
+		gcsProjectID = req.GCSProjectID
+	}
+
+	if err := h.orgs.UpdateOrgCloudStorageConfig(r.Context(), *claims.OrgID, req.Provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON); err != nil {
+		slog.Error("failed to update org cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	resp := cloudStorageConfigResponse{Provider: req.Provider, CredentialsSet: true}
+	switch req.Provider {
+	case "s3":
+		resp.Bucket = s3Bucket
+		resp.Region = s3Region
+		resp.Endpoint = s3Endpoint
+	case "gcs":
+		resp.GCSBucket = gcsBucket
+		resp.GCSProjectID = gcsProjectID
+	}
+	httputil.WriteJSON(w, http.StatusOK, resp)
+}
+
+// ClearOrgCloudStorageConfig handles DELETE /api/v1/admin/orgs/current/cloud-storage-config
+func (h *OrgHandler) ClearOrgCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.requireOrgAdmin(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.orgs.ClearOrgCloudStorageConfig(r.Context(), *claims.OrgID); err != nil {
+		slog.Error("failed to clear org cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 // --- Helpers ---
 
 // requireOrgAdmin extracts JWT claims and verifies the user is an org admin.

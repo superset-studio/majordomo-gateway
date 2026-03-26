@@ -23,26 +23,26 @@ import (
 )
 
 type Handler struct {
-	upstream       *UpstreamClient
-	storage        storage.Storage
-	s3Storage      *storage.S3BodyStorage
-	userS3Storage  *storage.UserS3Storage
-	userStore      storage.UserStorage
-	orgStore       storage.OrganizationStorage
-	secretStore    secrets.SecretStore
-	pricing        *pricing.Service
-	resolver       *auth.Resolver
-	proxyResolver  *auth.ProxyResolver
-	sessionMgr     *claudecode.SessionManager
-	config         *config.Config
-	providers      map[provider.Provider]string
-	userS3Cache    sync.Map // userID (string) → *cachedUserS3Config
-	orgS3Cache     sync.Map // orgID (string) → *cachedUserS3Config
-	userS3CacheTTL time.Duration
+	upstream         *UpstreamClient
+	storage          storage.Storage
+	s3Storage        *storage.S3BodyStorage
+	userBodyStorage  *storage.UserBodyStorage
+	userStore        storage.UserStorage
+	orgStore         storage.OrganizationStorage
+	secretStore      secrets.SecretStore
+	pricing          *pricing.Service
+	resolver         *auth.Resolver
+	proxyResolver    *auth.ProxyResolver
+	sessionMgr       *claudecode.SessionManager
+	config           *config.Config
+	providers        map[provider.Provider]string
+	userCloudCache   sync.Map // userID (string) → *cachedCloudStorageConfig
+	orgCloudCache    sync.Map // orgID (string) → *cachedCloudStorageConfig
+	cloudCacheTTL    time.Duration
 }
 
-type cachedUserS3Config struct {
-	config    *models.UserS3Config
+type cachedCloudStorageConfig struct {
+	config    *models.UserCloudStorageConfig
 	fetchedAt time.Time
 }
 
@@ -55,7 +55,7 @@ type ProviderKeyInfo struct {
 func NewHandler(
 	store storage.Storage,
 	s3Storage *storage.S3BodyStorage,
-	userS3Storage *storage.UserS3Storage,
+	userBodyStorage *storage.UserBodyStorage,
 	userStore storage.UserStorage,
 	orgStore storage.OrganizationStorage,
 	secretStore secrets.SecretStore,
@@ -72,20 +72,20 @@ func NewHandler(
 	}
 
 	return &Handler{
-		upstream:       NewUpstreamClient(cfg.Server.UpstreamTimeout, cfg.Server.StreamHeaderTimeout),
-		storage:        store,
-		s3Storage:      s3Storage,
-		userS3Storage:  userS3Storage,
-		userStore:      userStore,
-		orgStore:       orgStore,
-		secretStore:    secretStore,
-		pricing:        pricingSvc,
-		resolver:       resolver,
-		proxyResolver:  proxyResolver,
-		sessionMgr:     sessionMgr,
-		config:         cfg,
-		providers:      providers,
-		userS3CacheTTL: 5 * time.Minute,
+		upstream:        NewUpstreamClient(cfg.Server.UpstreamTimeout, cfg.Server.StreamHeaderTimeout),
+		storage:         store,
+		s3Storage:       s3Storage,
+		userBodyStorage: userBodyStorage,
+		userStore:       userStore,
+		orgStore:        orgStore,
+		secretStore:     secretStore,
+		pricing:         pricingSvc,
+		resolver:        resolver,
+		proxyResolver:   proxyResolver,
+		sessionMgr:      sessionMgr,
+		config:          cfg,
+		providers:       providers,
+		cloudCacheTTL:   5 * time.Minute,
 	}
 }
 
@@ -412,7 +412,7 @@ func (h *Handler) logRequest(
 	// Body storage: try user/org S3 first, fall back to global storage.
 	// Claude Code request bodies are never stored in global storage for privacy;
 	// they are only stored when the user or org has configured their own S3.
-	uploaded := h.storeBodyToUserOrOrgS3(ctx, log, apiKeyInfo, requestID, requestedAt, req, customHeaders, reqBody, resp)
+	uploaded := h.storeBodyToUserOrOrgCloud(ctx, log, apiKeyInfo, requestID, requestedAt, req, customHeaders, reqBody, resp)
 	if !uploaded && !isClaudeCode {
 		h.storeBodyToGlobalStorage(log, apiKeyInfo, requestID, requestedAt, req, customHeaders, reqBody, resp)
 	}
@@ -489,79 +489,104 @@ func extractCustomMetadata(headers map[string]string) map[string]string {
 	return metadata
 }
 
-// getUserS3Config retrieves and caches the decrypted S3 config for a user.
-// Returns nil if the user has no S3 config or if decryption fails.
-func (h *Handler) getUserS3Config(ctx context.Context, userID uuid.UUID) *models.UserS3Config {
+// getUserCloudStorageConfig retrieves and caches the decrypted cloud storage config for a user.
+// Returns nil if the user has no cloud storage config or if decryption fails.
+func (h *Handler) getUserCloudStorageConfig(ctx context.Context, userID uuid.UUID) *models.UserCloudStorageConfig {
 	key := userID.String()
 
-	if cached, ok := h.userS3Cache.Load(key); ok {
-		entry := cached.(*cachedUserS3Config)
-		if time.Since(entry.fetchedAt) < h.userS3CacheTTL {
+	if cached, ok := h.userCloudCache.Load(key); ok {
+		entry := cached.(*cachedCloudStorageConfig)
+		if time.Since(entry.fetchedAt) < h.cloudCacheTTL {
 			return entry.config
 		}
 	}
 
 	if h.userStore == nil || h.secretStore == nil {
-		slog.Debug("skipping user S3 config: missing dependency", "user_id", userID, "userStore_nil", h.userStore == nil, "secretStore_nil", h.secretStore == nil)
+		slog.Debug("skipping user cloud storage config: missing dependency", "user_id", userID)
 		return nil
 	}
 
-	user, err := h.userStore.GetUserS3Config(ctx, userID)
+	user, err := h.userStore.GetUserCloudStorageConfig(ctx, userID)
 	if err != nil {
-		slog.Debug("failed to get user S3 config", "error", err, "user_id", userID)
-		h.userS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
+		slog.Debug("failed to get user cloud storage config", "error", err, "user_id", userID)
+		h.userCloudCache.Store(key, &cachedCloudStorageConfig{config: nil, fetchedAt: time.Now()})
 		return nil
 	}
 
-	if user.S3Bucket == nil || *user.S3Bucket == "" || user.S3AccessKeyIDEncrypted == nil || user.S3SecretAccessKeyEncrypted == nil {
-		slog.Debug("user S3 config incomplete", "user_id", userID, "bucket_nil", user.S3Bucket == nil, "creds_nil", user.S3AccessKeyIDEncrypted == nil)
-		h.userS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	accessKeyID, err := h.secretStore.Decrypt(*user.S3AccessKeyIDEncrypted)
-	if err != nil {
-		slog.Error("failed to decrypt S3 access key ID", "error", err, "user_id", userID)
-		h.userS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	secretAccessKey, err := h.secretStore.Decrypt(*user.S3SecretAccessKeyEncrypted)
-	if err != nil {
-		slog.Error("failed to decrypt S3 secret access key", "error", err, "user_id", userID)
-		h.userS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	region := "us-east-1"
-	if user.S3Region != nil {
-		region = *user.S3Region
-	}
-	endpoint := ""
-	if user.S3Endpoint != nil {
-		endpoint = *user.S3Endpoint
-	}
-
-	cfg := &models.UserS3Config{
-		Bucket:         *user.S3Bucket,
-		Region:         region,
-		Endpoint:       endpoint,
-		AccessKeyID:    accessKeyID,
-		SecretAccessKey: secretAccessKey,
-	}
-
-	h.userS3Cache.Store(key, &cachedUserS3Config{config: cfg, fetchedAt: time.Now()})
+	cfg := h.resolveUserCloudConfig(user, userID)
+	h.userCloudCache.Store(key, &cachedCloudStorageConfig{config: cfg, fetchedAt: time.Now()})
 	return cfg
 }
 
-// getOrgS3Config retrieves and caches the decrypted S3 config for an organization.
-// Returns nil if the org has no S3 config or if decryption fails.
-func (h *Handler) getOrgS3Config(ctx context.Context, orgID uuid.UUID) *models.UserS3Config {
+// resolveUserCloudConfig decrypts and builds a UserCloudStorageConfig from a User model.
+func (h *Handler) resolveUserCloudConfig(user *models.User, ownerID uuid.UUID) *models.UserCloudStorageConfig {
+	provider := ""
+	if user.CloudStorageProvider != nil {
+		provider = *user.CloudStorageProvider
+	}
+
+	switch models.CloudStorageProviderType(provider) {
+	case models.CloudStorageProviderGCS:
+		if user.GCSBucket == nil || *user.GCSBucket == "" || user.GCSCredentialsJSONEncrypted == nil {
+			return nil
+		}
+		credJSON, err := h.secretStore.Decrypt(*user.GCSCredentialsJSONEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt GCS credentials JSON", "error", err, "owner_id", ownerID)
+			return nil
+		}
+		projectID := ""
+		if user.GCSProjectID != nil {
+			projectID = *user.GCSProjectID
+		}
+		return &models.UserCloudStorageConfig{
+			Provider:           models.CloudStorageProviderGCS,
+			GCSBucket:          *user.GCSBucket,
+			GCSProjectID:       projectID,
+			GCSCredentialsJSON: credJSON,
+		}
+	default:
+		// S3 or legacy (no provider set but S3 columns populated)
+		if user.S3Bucket == nil || *user.S3Bucket == "" || user.S3AccessKeyIDEncrypted == nil || user.S3SecretAccessKeyEncrypted == nil {
+			return nil
+		}
+		accessKeyID, err := h.secretStore.Decrypt(*user.S3AccessKeyIDEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt S3 access key ID", "error", err, "owner_id", ownerID)
+			return nil
+		}
+		secretAccessKey, err := h.secretStore.Decrypt(*user.S3SecretAccessKeyEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt S3 secret access key", "error", err, "owner_id", ownerID)
+			return nil
+		}
+		region := "us-east-1"
+		if user.S3Region != nil {
+			region = *user.S3Region
+		}
+		endpoint := ""
+		if user.S3Endpoint != nil {
+			endpoint = *user.S3Endpoint
+		}
+		return &models.UserCloudStorageConfig{
+			Provider:       models.CloudStorageProviderS3,
+			Bucket:         *user.S3Bucket,
+			Region:         region,
+			Endpoint:       endpoint,
+			AccessKeyID:    accessKeyID,
+			SecretAccessKey: secretAccessKey,
+		}
+	}
+}
+
+// getOrgCloudStorageConfig retrieves and caches the decrypted cloud storage config for an organization.
+// Returns nil if the org has no cloud storage config or if decryption fails.
+func (h *Handler) getOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID) *models.UserCloudStorageConfig {
 	key := orgID.String()
 
-	if cached, ok := h.orgS3Cache.Load(key); ok {
-		entry := cached.(*cachedUserS3Config)
-		if time.Since(entry.fetchedAt) < h.userS3CacheTTL {
+	if cached, ok := h.orgCloudCache.Load(key); ok {
+		entry := cached.(*cachedCloudStorageConfig)
+		if time.Since(entry.fetchedAt) < h.cloudCacheTTL {
 			return entry.config
 		}
 	}
@@ -570,51 +595,76 @@ func (h *Handler) getOrgS3Config(ctx context.Context, orgID uuid.UUID) *models.U
 		return nil
 	}
 
-	org, err := h.orgStore.GetOrgS3Config(ctx, orgID)
+	org, err := h.orgStore.GetOrgCloudStorageConfig(ctx, orgID)
 	if err != nil {
-		slog.Debug("failed to get org S3 config", "error", err, "org_id", orgID)
-		h.orgS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
+		slog.Debug("failed to get org cloud storage config", "error", err, "org_id", orgID)
+		h.orgCloudCache.Store(key, &cachedCloudStorageConfig{config: nil, fetchedAt: time.Now()})
 		return nil
 	}
 
-	if org.S3Bucket == nil || *org.S3Bucket == "" || org.S3AccessKeyIDEncrypted == nil || org.S3SecretAccessKeyEncrypted == nil {
-		h.orgS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	accessKeyID, err := h.secretStore.Decrypt(*org.S3AccessKeyIDEncrypted)
-	if err != nil {
-		slog.Error("failed to decrypt org S3 access key ID", "error", err, "org_id", orgID)
-		h.orgS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	secretAccessKey, err := h.secretStore.Decrypt(*org.S3SecretAccessKeyEncrypted)
-	if err != nil {
-		slog.Error("failed to decrypt org S3 secret access key", "error", err, "org_id", orgID)
-		h.orgS3Cache.Store(key, &cachedUserS3Config{config: nil, fetchedAt: time.Now()})
-		return nil
-	}
-
-	region := "us-east-1"
-	if org.S3Region != nil {
-		region = *org.S3Region
-	}
-	endpoint := ""
-	if org.S3Endpoint != nil {
-		endpoint = *org.S3Endpoint
-	}
-
-	cfg := &models.UserS3Config{
-		Bucket:         *org.S3Bucket,
-		Region:         region,
-		Endpoint:       endpoint,
-		AccessKeyID:    accessKeyID,
-		SecretAccessKey: secretAccessKey,
-	}
-
-	h.orgS3Cache.Store(key, &cachedUserS3Config{config: cfg, fetchedAt: time.Now()})
+	cfg := h.resolveOrgCloudConfig(org, orgID)
+	h.orgCloudCache.Store(key, &cachedCloudStorageConfig{config: cfg, fetchedAt: time.Now()})
 	return cfg
+}
+
+// resolveOrgCloudConfig decrypts and builds a UserCloudStorageConfig from an Organization model.
+func (h *Handler) resolveOrgCloudConfig(org *models.Organization, orgID uuid.UUID) *models.UserCloudStorageConfig {
+	provider := ""
+	if org.CloudStorageProvider != nil {
+		provider = *org.CloudStorageProvider
+	}
+
+	switch models.CloudStorageProviderType(provider) {
+	case models.CloudStorageProviderGCS:
+		if org.GCSBucket == nil || *org.GCSBucket == "" || org.GCSCredentialsJSONEncrypted == nil {
+			return nil
+		}
+		credJSON, err := h.secretStore.Decrypt(*org.GCSCredentialsJSONEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt org GCS credentials JSON", "error", err, "org_id", orgID)
+			return nil
+		}
+		projectID := ""
+		if org.GCSProjectID != nil {
+			projectID = *org.GCSProjectID
+		}
+		return &models.UserCloudStorageConfig{
+			Provider:           models.CloudStorageProviderGCS,
+			GCSBucket:          *org.GCSBucket,
+			GCSProjectID:       projectID,
+			GCSCredentialsJSON: credJSON,
+		}
+	default:
+		if org.S3Bucket == nil || *org.S3Bucket == "" || org.S3AccessKeyIDEncrypted == nil || org.S3SecretAccessKeyEncrypted == nil {
+			return nil
+		}
+		accessKeyID, err := h.secretStore.Decrypt(*org.S3AccessKeyIDEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt org S3 access key ID", "error", err, "org_id", orgID)
+			return nil
+		}
+		secretAccessKey, err := h.secretStore.Decrypt(*org.S3SecretAccessKeyEncrypted)
+		if err != nil {
+			slog.Error("failed to decrypt org S3 secret access key", "error", err, "org_id", orgID)
+			return nil
+		}
+		region := "us-east-1"
+		if org.S3Region != nil {
+			region = *org.S3Region
+		}
+		endpoint := ""
+		if org.S3Endpoint != nil {
+			endpoint = *org.S3Endpoint
+		}
+		return &models.UserCloudStorageConfig{
+			Provider:       models.CloudStorageProviderS3,
+			Bucket:         *org.S3Bucket,
+			Region:         region,
+			Endpoint:       endpoint,
+			AccessKeyID:    accessKeyID,
+			SecretAccessKey: secretAccessKey,
+		}
+	}
 }
 
 // buildBodyUpload creates a BodyUpload from the common request/response parameters.
@@ -633,9 +683,9 @@ func buildBodyUpload(key string, requestID uuid.UUID, requestedAt time.Time, req
 	}
 }
 
-// storeBodyToUserOrOrgS3 attempts to upload the request/response body to a
-// user-specific or org-specific S3 bucket. Returns true if an upload was fired.
-func (h *Handler) storeBodyToUserOrOrgS3(
+// storeBodyToUserOrOrgCloud attempts to upload the request/response body to a
+// user-specific or org-specific cloud storage bucket (S3 or GCS). Returns true if an upload was fired.
+func (h *Handler) storeBodyToUserOrOrgCloud(
 	ctx context.Context,
 	log *models.RequestLog,
 	apiKeyInfo *models.APIKeyInfo,
@@ -646,25 +696,25 @@ func (h *Handler) storeBodyToUserOrOrgS3(
 	reqBody []byte,
 	resp *UpstreamResponse,
 ) bool {
-	if h.userS3Storage == nil {
+	if h.userBodyStorage == nil {
 		return false
 	}
 
-	// Try user S3 first, then fall back to org S3.
-	type s3Target struct {
+	// Try user cloud storage first, then fall back to org cloud storage.
+	type cloudTarget struct {
 		ownerID uuid.UUID
-		cfg     *models.UserS3Config
+		cfg     *models.UserCloudStorageConfig
 	}
-	var target *s3Target
+	var target *cloudTarget
 
 	if apiKeyInfo.UserID != nil {
-		if cfg := h.getUserS3Config(ctx, *apiKeyInfo.UserID); cfg != nil {
-			target = &s3Target{ownerID: *apiKeyInfo.UserID, cfg: cfg}
+		if cfg := h.getUserCloudStorageConfig(ctx, *apiKeyInfo.UserID); cfg != nil {
+			target = &cloudTarget{ownerID: *apiKeyInfo.UserID, cfg: cfg}
 		}
 	}
 	if target == nil && apiKeyInfo.OrgID != nil {
-		if cfg := h.getOrgS3Config(ctx, *apiKeyInfo.OrgID); cfg != nil {
-			target = &s3Target{ownerID: *apiKeyInfo.OrgID, cfg: cfg}
+		if cfg := h.getOrgCloudStorageConfig(ctx, *apiKeyInfo.OrgID); cfg != nil {
+			target = &cloudTarget{ownerID: *apiKeyInfo.OrgID, cfg: cfg}
 		}
 	}
 
@@ -672,10 +722,10 @@ func (h *Handler) storeBodyToUserOrOrgS3(
 		return false
 	}
 
-	s3Key := storage.GenerateS3Key(apiKeyInfo.ID, requestID, requestedAt)
-	log.BodyS3Key = &s3Key
-	upload := buildBodyUpload(s3Key, requestID, requestedAt, req, customHeaders, reqBody, resp)
-	h.userS3Storage.Upload(ctx, target.ownerID, target.cfg, upload)
+	storageKey := storage.GenerateS3Key(apiKeyInfo.ID, requestID, requestedAt)
+	log.BodyS3Key = &storageKey
+	upload := buildBodyUpload(storageKey, requestID, requestedAt, req, customHeaders, reqBody, resp)
+	h.userBodyStorage.Upload(ctx, target.ownerID, target.cfg, upload)
 	return true
 }
 

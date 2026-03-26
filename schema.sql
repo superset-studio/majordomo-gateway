@@ -476,3 +476,18 @@ CREATE TABLE IF NOT EXISTS eval_result_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_eval_result_scores_result ON eval_result_scores(eval_result_id);
 CREATE INDEX IF NOT EXISTS idx_eval_result_scores_name ON eval_result_scores(evaluator_name);
+
+-- Cloud storage provider support (S3 or GCS) for per-user and per-org body storage
+ALTER TABLE users ADD COLUMN IF NOT EXISTS cloud_storage_provider VARCHAR(10);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gcs_bucket VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gcs_project_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gcs_credentials_json_encrypted TEXT;
+
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cloud_storage_provider VARCHAR(10);
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gcs_bucket VARCHAR(255);
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gcs_project_id VARCHAR(255);
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gcs_credentials_json_encrypted TEXT;
+
+-- One-time migration (run manually after applying schema):
+-- UPDATE users SET cloud_storage_provider = 's3' WHERE s3_bucket IS NOT NULL AND s3_bucket != '';
+-- UPDATE organizations SET cloud_storage_provider = 's3' WHERE s3_bucket IS NOT NULL AND s3_bucket != '';

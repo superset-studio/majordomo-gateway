@@ -190,6 +190,74 @@ func (s *PostgresStorage) GetUserS3Config(ctx context.Context, userID uuid.UUID)
 	return &user, nil
 }
 
+// UpdateUserCloudStorageConfig sets cloud storage configuration (S3 or GCS) for a user.
+func (s *PostgresStorage) UpdateUserCloudStorageConfig(ctx context.Context, userID uuid.UUID, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON string) error {
+	query := `
+		UPDATE users
+		SET cloud_storage_provider = $1,
+			s3_bucket = $2, s3_region = $3, s3_endpoint = $4,
+			s3_access_key_id_encrypted = $5, s3_secret_access_key_encrypted = $6,
+			gcs_bucket = $7, gcs_project_id = $8, gcs_credentials_json_encrypted = $9
+		WHERE id = $10`
+
+	result, err := s.db.ExecContext(ctx, query, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ClearUserCloudStorageConfig removes all cloud storage configuration for a user.
+func (s *PostgresStorage) ClearUserCloudStorageConfig(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET cloud_storage_provider = NULL,
+			s3_bucket = NULL, s3_region = 'us-east-1', s3_endpoint = NULL,
+			s3_access_key_id_encrypted = NULL, s3_secret_access_key_encrypted = NULL,
+			gcs_bucket = NULL, gcs_project_id = NULL, gcs_credentials_json_encrypted = NULL
+		WHERE id = $1`
+
+	result, err := s.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// GetUserCloudStorageConfig retrieves all cloud storage configuration columns for a user.
+func (s *PostgresStorage) GetUserCloudStorageConfig(ctx context.Context, userID uuid.UUID) (*models.User, error) {
+	query := `SELECT cloud_storage_provider,
+		s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted,
+		gcs_bucket, gcs_project_id, gcs_credentials_json_encrypted
+		FROM users WHERE id = $1`
+
+	var user models.User
+	err := s.db.GetContext(ctx, &user, query, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // MarkUserEmailVerified sets email_verified = true for a user.
 func (s *PostgresStorage) MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error {
 	query := `UPDATE users SET email_verified = true WHERE id = $1`

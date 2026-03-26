@@ -363,6 +363,74 @@ func (s *PostgresStorage) GetOrgS3Config(ctx context.Context, orgID uuid.UUID) (
 	return &org, nil
 }
 
+// UpdateOrgCloudStorageConfig sets cloud storage configuration (S3 or GCS) for an organization.
+func (s *PostgresStorage) UpdateOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON string) error {
+	query := `
+		UPDATE organizations
+		SET cloud_storage_provider = $1,
+			s3_bucket = $2, s3_region = $3, s3_endpoint = $4,
+			s3_access_key_id_encrypted = $5, s3_secret_access_key_encrypted = $6,
+			gcs_bucket = $7, gcs_project_id = $8, gcs_credentials_json_encrypted = $9
+		WHERE id = $10`
+
+	result, err := s.db.ExecContext(ctx, query, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON, orgID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrOrgNotFound
+	}
+	return nil
+}
+
+// ClearOrgCloudStorageConfig removes all cloud storage configuration from an organization.
+func (s *PostgresStorage) ClearOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID) error {
+	query := `
+		UPDATE organizations
+		SET cloud_storage_provider = NULL,
+			s3_bucket = NULL, s3_region = 'us-east-1', s3_endpoint = NULL,
+			s3_access_key_id_encrypted = NULL, s3_secret_access_key_encrypted = NULL,
+			gcs_bucket = NULL, gcs_project_id = NULL, gcs_credentials_json_encrypted = NULL
+		WHERE id = $1`
+
+	result, err := s.db.ExecContext(ctx, query, orgID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrOrgNotFound
+	}
+	return nil
+}
+
+// GetOrgCloudStorageConfig retrieves all cloud storage configuration columns for an organization.
+func (s *PostgresStorage) GetOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID) (*models.Organization, error) {
+	query := `SELECT cloud_storage_provider,
+		s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted,
+		gcs_bucket, gcs_project_id, gcs_credentials_json_encrypted
+		FROM organizations WHERE id = $1`
+
+	var org models.Organization
+	err := s.db.GetContext(ctx, &org, query, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrOrgNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
+
 // CreateInvite creates a new organization invite.
 func (s *PostgresStorage) CreateInvite(ctx context.Context, orgID uuid.UUID, input *models.CreateInviteInput, invitedBy uuid.UUID, token string, expiresAt time.Time) (*models.OrganizationInvite, error) {
 	query := `

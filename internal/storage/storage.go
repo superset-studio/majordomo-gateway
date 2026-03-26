@@ -41,6 +41,9 @@ type UserStorage interface {
     UpdateUserS3Config(ctx context.Context, userID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
     ClearUserS3Config(ctx context.Context, userID uuid.UUID) error
     GetUserS3Config(ctx context.Context, userID uuid.UUID) (*models.User, error)
+    UpdateUserCloudStorageConfig(ctx context.Context, userID uuid.UUID, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON string) error
+    ClearUserCloudStorageConfig(ctx context.Context, userID uuid.UUID) error
+    GetUserCloudStorageConfig(ctx context.Context, userID uuid.UUID) (*models.User, error)
     MarkUserEmailVerified(ctx context.Context, id uuid.UUID) error
 }
 
@@ -117,6 +120,11 @@ type OrganizationStorage interface {
 	UpdateOrgS3Config(ctx context.Context, orgID uuid.UUID, bucket, region, endpoint, encAccessKeyID, encSecretAccessKey string) error
 	ClearOrgS3Config(ctx context.Context, orgID uuid.UUID) error
 	GetOrgS3Config(ctx context.Context, orgID uuid.UUID) (*models.Organization, error)
+
+	// Cloud Storage Config (S3 or GCS)
+	UpdateOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID, provider, s3Bucket, s3Region, s3Endpoint, encS3AccessKeyID, encS3SecretKey, gcsBucket, gcsProjectID, encGCSCredJSON string) error
+	ClearOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID) error
+	GetOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID) (*models.Organization, error)
 
 	// Invites
 	CreateInvite(ctx context.Context, orgID uuid.UUID, input *models.CreateInviteInput, invitedBy uuid.UUID, token string, expiresAt time.Time) (*models.OrganizationInvite, error)

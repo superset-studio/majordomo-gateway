@@ -18,12 +18,16 @@ type User struct {
 	EmailVerified  bool      `json:"email_verified" db:"email_verified"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 
-	// Per-user S3 body storage configuration
-	S3Bucket                   *string `json:"s3_bucket,omitempty" db:"s3_bucket"`
-	S3Region                   *string `json:"s3_region,omitempty" db:"s3_region"`
-	S3Endpoint                 *string `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
-	S3AccessKeyIDEncrypted     *string `json:"-" db:"s3_access_key_id_encrypted"`
-	S3SecretAccessKeyEncrypted *string `json:"-" db:"s3_secret_access_key_encrypted"`
+	// Per-user cloud body storage configuration
+	CloudStorageProvider        *string `json:"cloud_storage_provider,omitempty" db:"cloud_storage_provider"`
+	S3Bucket                    *string `json:"s3_bucket,omitempty" db:"s3_bucket"`
+	S3Region                    *string `json:"s3_region,omitempty" db:"s3_region"`
+	S3Endpoint                  *string `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
+	S3AccessKeyIDEncrypted      *string `json:"-" db:"s3_access_key_id_encrypted"`
+	S3SecretAccessKeyEncrypted  *string `json:"-" db:"s3_secret_access_key_encrypted"`
+	GCSBucket                   *string `json:"gcs_bucket,omitempty" db:"gcs_bucket"`
+	GCSProjectID                *string `json:"gcs_project_id,omitempty" db:"gcs_project_id"`
+	GCSCredentialsJSONEncrypted *string `json:"-" db:"gcs_credentials_json_encrypted"`
 }
 
 // UserS3Config holds decrypted S3 configuration for per-user body storage.
@@ -33,6 +37,29 @@ type UserS3Config struct {
 	Endpoint       string
 	AccessKeyID    string
 	SecretAccessKey string
+}
+
+// CloudStorageProviderType identifies the cloud storage provider.
+type CloudStorageProviderType string
+
+const (
+	CloudStorageProviderS3  CloudStorageProviderType = "s3"
+	CloudStorageProviderGCS CloudStorageProviderType = "gcs"
+)
+
+// UserCloudStorageConfig holds decrypted cloud storage configuration (S3 or GCS).
+type UserCloudStorageConfig struct {
+	Provider CloudStorageProviderType
+	// S3 fields
+	Bucket         string
+	Region         string
+	Endpoint       string
+	AccessKeyID    string
+	SecretAccessKey string
+	// GCS fields
+	GCSBucket          string
+	GCSProjectID       string
+	GCSCredentialsJSON string
 }
 
 // CreateUserInput contains fields for creating a new user
@@ -226,15 +253,19 @@ type ClaudeRequestMetadata struct {
 
 // Organization represents a team/organization for shared API key and reporting management.
 type Organization struct {
-	ID                         uuid.UUID `json:"id" db:"id"`
-	Name                       string    `json:"name" db:"name"`
-	Slug                       string    `json:"slug" db:"slug"`
-	S3Bucket                   *string   `json:"s3_bucket,omitempty" db:"s3_bucket"`
-	S3Region                   *string   `json:"s3_region,omitempty" db:"s3_region"`
-	S3Endpoint                 *string   `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
-	S3AccessKeyIDEncrypted     *string   `json:"-" db:"s3_access_key_id_encrypted"`
-	S3SecretAccessKeyEncrypted *string   `json:"-" db:"s3_secret_access_key_encrypted"`
-	CreatedAt                  time.Time `json:"created_at" db:"created_at"`
+	ID                          uuid.UUID `json:"id" db:"id"`
+	Name                        string    `json:"name" db:"name"`
+	Slug                        string    `json:"slug" db:"slug"`
+	CloudStorageProvider        *string   `json:"cloud_storage_provider,omitempty" db:"cloud_storage_provider"`
+	S3Bucket                    *string   `json:"s3_bucket,omitempty" db:"s3_bucket"`
+	S3Region                    *string   `json:"s3_region,omitempty" db:"s3_region"`
+	S3Endpoint                  *string   `json:"s3_endpoint,omitempty" db:"s3_endpoint"`
+	S3AccessKeyIDEncrypted      *string   `json:"-" db:"s3_access_key_id_encrypted"`
+	S3SecretAccessKeyEncrypted  *string   `json:"-" db:"s3_secret_access_key_encrypted"`
+	GCSBucket                   *string   `json:"gcs_bucket,omitempty" db:"gcs_bucket"`
+	GCSProjectID                *string   `json:"gcs_project_id,omitempty" db:"gcs_project_id"`
+	GCSCredentialsJSONEncrypted *string   `json:"-" db:"gcs_credentials_json_encrypted"`
+	CreatedAt                   time.Time `json:"created_at" db:"created_at"`
 }
 
 // OrganizationMember represents a user's membership in an organization.

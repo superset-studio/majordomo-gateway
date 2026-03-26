@@ -142,8 +142,8 @@ func runServe(args []string) {
 	sessionMgr := claudecode.NewSessionManager(store)
 	claudeHandler := api.NewClaudeSessionHandler(sessionMgr, store)
 
-	// Set up per-user S3 body storage
-	userS3Storage := storage.NewUserS3Storage()
+	// Set up per-user/org cloud body storage (S3 and GCS)
+	userBodyStorage := storage.NewUserBodyStorage()
 
 	// Determine secret store and user store for proxy handler
 	var proxySecretStore secrets.SecretStore
@@ -151,7 +151,7 @@ func runServe(args []string) {
 		proxySecretStore, _ = secrets.NewAESStore(cfg.Secrets.EncryptionKey)
 	}
 
-	proxyHandler := proxy.NewHandler(store, s3Storage, userS3Storage, store, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
+	proxyHandler := proxy.NewHandler(store, s3Storage, userBodyStorage, store, store, proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg)
 
 	// Set up admin web UI if JWT secret is configured
 	var adminCfg *server.AdminConfig
@@ -186,7 +186,7 @@ func runServe(args []string) {
 		}
 
 		adminHandler := api.NewAdminHandler(store, store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
-		usageHandler = api.NewUsageHandler(store, store, store, store, adminSecretStore, s3Storage, userS3Storage)
+		usageHandler = api.NewUsageHandler(store, store, store, store, adminSecretStore, s3Storage, userBodyStorage)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		replayHandler = api.NewReplayHandler(store, store)
