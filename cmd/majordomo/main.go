@@ -158,6 +158,7 @@ func runServe(args []string) {
 	var usageHandler *api.UsageHandler
 	var metadataHandler *api.MetadataHandler
 	var claudeAnalyticsHandler *api.ClaudeAnalyticsHandler
+	var replayHandler *api.ReplayHandler
 	if cfg.JWT.Secret != "" {
 		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
 
@@ -183,10 +184,11 @@ func runServe(args []string) {
 			emailSender = apiemail.NewResendSender(cfg.Email.ResendAPIKey, cfg.Email.From)
 		}
 
-		adminHandler := api.NewAdminHandler(store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
+		adminHandler := api.NewAdminHandler(store, store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
 		usageHandler = api.NewUsageHandler(store, store, store, store, adminSecretStore, s3Storage, userS3Storage)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
+		replayHandler = api.NewReplayHandler(store, store)
 		var orgHandler *api.OrgHandler
 		if adminSecretStore != nil {
 			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc, store, emailSender, frontendURL)
@@ -216,7 +218,7 @@ func runServe(args []string) {
 		slog.Info("admin web UI enabled")
 	}
 
-	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler, claudeAnalyticsHandler)
+	srv := server.New(&cfg.Server, proxyHandler, store, apiHandler, resolver, adminCfg, claudeHandler, usageHandler, metadataHandler, claudeAnalyticsHandler, replayHandler)
 
 	errChan := make(chan error, 1)
 	go func() {

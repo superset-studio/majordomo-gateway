@@ -34,7 +34,7 @@ type AdminConfig struct {
 	CORSOrigins  []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -80,6 +80,9 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 				r.Get("/me/s3-config", adminCfg.AdminHandler.GetS3Config)
 				r.Put("/me/s3-config", adminCfg.AdminHandler.UpdateS3Config)
 				r.Delete("/me/s3-config", adminCfg.AdminHandler.DeleteS3Config)
+				r.Get("/me/provider-keys", adminCfg.AdminHandler.ListProviderKeys)
+				r.Put("/me/provider-keys/{provider}", adminCfg.AdminHandler.SetProviderKey)
+				r.Delete("/me/provider-keys/{provider}", adminCfg.AdminHandler.DeleteProviderKey)
 				r.Get("/api-keys", adminCfg.AdminHandler.ListAPIKeys)
 				r.Post("/api-keys", adminCfg.AdminHandler.CreateAPIKey)
 				r.Get("/api-keys/{id}", adminCfg.AdminHandler.GetAPIKey)
@@ -118,6 +121,16 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 			if metadataHandler != nil {
 					r.Get("/metadata-keys", metadataHandler.ListMetadataKeys)
 					r.Put("/api-keys/{id}/metadata-keys/{keyName}", metadataHandler.UpdateMetadataKey)
+				}
+
+				if replayHandler != nil {
+					r.Get("/replay/providers", replayHandler.ListProviders)
+					r.Post("/replay/runs", replayHandler.CreateRun)
+					r.Get("/replay/runs", replayHandler.ListRuns)
+					r.Get("/replay/runs/{id}", replayHandler.GetRun)
+					r.Post("/replay/runs/{id}/cancel", replayHandler.CancelRun)
+					r.Get("/replay/runs/{id}/results", replayHandler.ListResults)
+					r.Get("/replay/runs/{id}/results/{resultId}", replayHandler.GetResult)
 				}
 
 				if adminCfg.OrgHandler != nil {

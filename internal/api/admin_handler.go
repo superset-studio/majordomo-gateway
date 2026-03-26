@@ -21,17 +21,18 @@ import (
 
 // AdminHandler provides REST API endpoints for the admin web UI.
 type AdminHandler struct {
-    apiKeys     storage.APIKeyStorage
-    proxyKeys   storage.ProxyKeyStorage
-    users       storage.UserStorage
-    orgs        storage.OrganizationStorage
-    secrets     secrets.SecretStore
-    jwt         *auth.JWTService
-    proxyKeySvc *ProxyKeyService
-    pwdResets   storage.PasswordResetStorage
-    emailVerify storage.EmailVerificationStorage
-    email       EmailSender
-    frontendURL string
+    apiKeys      storage.APIKeyStorage
+    proxyKeys    storage.ProxyKeyStorage
+    users        storage.UserStorage
+    orgs         storage.OrganizationStorage
+    providerKeys storage.ProviderKeyStorage
+    secrets      secrets.SecretStore
+    jwt          *auth.JWTService
+    proxyKeySvc  *ProxyKeyService
+    pwdResets    storage.PasswordResetStorage
+    emailVerify  storage.EmailVerificationStorage
+    email        EmailSender
+    frontendURL  string
 }
 
 // NewAdminHandler creates a new admin API handler.
@@ -40,6 +41,7 @@ func NewAdminHandler(
     proxyKeys storage.ProxyKeyStorage,
     users storage.UserStorage,
     orgs storage.OrganizationStorage,
+    providerKeys storage.ProviderKeyStorage,
     secretStore secrets.SecretStore,
     jwtSvc *auth.JWTService,
     pwdResets storage.PasswordResetStorage,
@@ -48,17 +50,18 @@ func NewAdminHandler(
     frontendURL string,
 ) *AdminHandler {
     return &AdminHandler{
-        apiKeys:     apiKeys,
-        proxyKeys:   proxyKeys,
-        users:       users,
-        orgs:        orgs,
-        secrets:     secretStore,
-        jwt:         jwtSvc,
-        proxyKeySvc: NewProxyKeyService(proxyKeys, secretStore),
-        pwdResets:   pwdResets,
-        emailVerify: emailVerify,
-        email:       email,
-        frontendURL: strings.TrimRight(frontendURL, "/"),
+        apiKeys:      apiKeys,
+        proxyKeys:    proxyKeys,
+        users:        users,
+        orgs:         orgs,
+        providerKeys: providerKeys,
+        secrets:      secretStore,
+        jwt:          jwtSvc,
+        proxyKeySvc:  NewProxyKeyService(proxyKeys, secretStore),
+        pwdResets:    pwdResets,
+        emailVerify:  emailVerify,
+        email:        email,
+        frontendURL:  strings.TrimRight(frontendURL, "/"),
     }
 }
 
@@ -1025,4 +1028,108 @@ func (h *AdminHandler) verifyProxyKeyOwnership(w http.ResponseWriter, r *http.Re
 	}
 
 	return apiKey, pk, true
+}
+
+// --- Provider API Keys (for Replay) ---
+
+type setProviderKeyRequest struct {
+	APIKey string `json:"apiKey"`
+}
+
+// ListProviderKeys handles GET /api/v1/admin/me/provider-keys
+func (h *AdminHandler) ListProviderKeys(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	keys, err := h.providerKeys.ListProviderKeys(r.Context(), &claims.UserID, claims.OrgID)
+	if err != nil {
+		slog.Error("failed to list provider keys", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, keys)
+}
+
+// SetProviderKey handles PUT /api/v1/admin/me/provider-keys/{provider}
+func (h *AdminHandler) SetProviderKey(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	provider := chi.URLParam(r, "provider")
+	if provider == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	var req setProviderKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.APIKey == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "apiKey is required")
+		return
+	}
+
+	if h.secrets == nil {
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
+		return
+	}
+
+	encKey, err := h.secrets.Encrypt(req.APIKey)
+	if err != nil {
+		slog.Error("failed to encrypt provider API key", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	ownerUserID := &claims.UserID
+	ownerOrgID := claims.OrgID
+	if ownerOrgID != nil {
+		ownerUserID = nil
+	}
+
+	if err := h.providerKeys.SetProviderKey(r.Context(), ownerUserID, ownerOrgID, provider, encKey); err != nil {
+		slog.Error("failed to set provider key", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// DeleteProviderKey handles DELETE /api/v1/admin/me/provider-keys/{provider}
+func (h *AdminHandler) DeleteProviderKey(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	provider := chi.URLParam(r, "provider")
+	if provider == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	ownerUserID := &claims.UserID
+	ownerOrgID := claims.OrgID
+	if ownerOrgID != nil {
+		ownerUserID = nil
+	}
+
+	if err := h.providerKeys.DeleteProviderKey(r.Context(), ownerUserID, ownerOrgID, provider); err != nil {
+		slog.Error("failed to delete provider key", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

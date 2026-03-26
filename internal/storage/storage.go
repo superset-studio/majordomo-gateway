@@ -128,6 +128,26 @@ type OrganizationStorage interface {
 	ListInvitesByEmail(ctx context.Context, email string) ([]*models.OrganizationInvite, error)
 }
 
+// ProviderKeyStorage defines the interface for provider API key CRUD operations (for replay).
+type ProviderKeyStorage interface {
+	SetProviderKey(ctx context.Context, userID *uuid.UUID, orgID *uuid.UUID, provider string, encryptedKey string) error
+	ListProviderKeys(ctx context.Context, userID *uuid.UUID, orgID *uuid.UUID) ([]*models.ProviderKeyInfo, error)
+	GetProviderKey(ctx context.Context, userID *uuid.UUID, orgID *uuid.UUID, provider string) (*models.ProviderAPIKey, error)
+	DeleteProviderKey(ctx context.Context, userID *uuid.UUID, orgID *uuid.UUID, provider string) error
+}
+
+// ReplayStorage defines the interface for replay run and result CRUD operations.
+type ReplayStorage interface {
+	CreateReplayRun(ctx context.Context, run *models.ReplayRun) error
+	GetReplayRun(ctx context.Context, id uuid.UUID) (*models.ReplayRun, error)
+	ListReplayRuns(ctx context.Context, userID uuid.UUID, orgID *uuid.UUID, limit, offset int) ([]*models.ReplayRunListItem, int, error)
+	UpdateReplayRunStatus(ctx context.Context, id uuid.UUID, status string, errorMessage *string) error
+	CancelReplayRun(ctx context.Context, id uuid.UUID, userID uuid.UUID, orgID *uuid.UUID) error
+	ListReplayResults(ctx context.Context, runID uuid.UUID, limit, offset int) ([]*models.ReplayResult, int, error)
+	GetReplayResult(ctx context.Context, id uuid.UUID) (*models.ReplayResult, error)
+	ListLLMProviders(ctx context.Context) ([]*models.LLMProvider, error)
+}
+
 // ClaudeAnalyticsStorage defines the interface for Claude Code analytics queries.
 type ClaudeAnalyticsStorage interface {
 	GetClaudeSummary(ctx context.Context, filter *UsageFilter) (*models.ClaudeSummary, error)

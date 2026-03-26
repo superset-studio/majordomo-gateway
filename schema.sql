@@ -265,3 +265,111 @@ CREATE TABLE IF NOT EXISTS email_verification_tokens (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user ON email_verification_tokens(user_id);
+
+-- Provider API Keys (for replay — encrypted credentials per user/org)
+CREATE TABLE IF NOT EXISTS provider_api_keys (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID REFERENCES users(id) ON DELETE CASCADE,
+    org_id          UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    provider        VARCHAR(100) NOT NULL,
+    encrypted_key   TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (
+        (user_id IS NOT NULL AND org_id IS NULL) OR
+        (user_id IS NULL AND org_id IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_api_keys_user_provider ON provider_api_keys(user_id, provider) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_api_keys_org_provider ON provider_api_keys(org_id, provider) WHERE org_id IS NOT NULL;
+
+-- Replay Runs (job queue for model optimization replays)
+CREATE TABLE IF NOT EXISTS replay_runs (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID NOT NULL REFERENCES users(id),
+    org_id                  UUID REFERENCES organizations(id),
+
+    status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+    error_message           TEXT,
+
+    -- Source filters
+    source_api_key_id       UUID REFERENCES api_keys(id),
+    source_provider         VARCHAR(100),
+    source_model            VARCHAR(100),
+    source_start            TIMESTAMPTZ,
+    source_end              TIMESTAMPTZ,
+    source_metadata         JSONB,
+    source_limit            INT NOT NULL DEFAULT 50,
+
+    -- Target model
+    target_provider         VARCHAR(100) NOT NULL,
+    target_model            VARCHAR(100) NOT NULL,
+
+    -- Judge config
+    judge_enabled           BOOLEAN NOT NULL DEFAULT false,
+    judge_provider          VARCHAR(100),
+    judge_model             VARCHAR(100),
+
+    -- Summary stats (populated on completion)
+    total_requests          INT,
+    exact_matches           INT,
+    judge_equivalent        INT,
+    divergent               INT,
+    original_total_cost     NUMERIC(12,8),
+    replay_total_cost       NUMERIC(12,8),
+    original_avg_latency_ms INT,
+    replay_avg_latency_ms   INT,
+
+    started_at              TIMESTAMPTZ,
+    completed_at            TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_replay_runs_user_status ON replay_runs(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_replay_runs_org_status ON replay_runs(org_id, status, created_at DESC) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_replay_runs_pending ON replay_runs(status) WHERE status = 'pending';
+
+-- Replay Results (per-request comparison results)
+CREATE TABLE IF NOT EXISTS replay_results (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    replay_run_id           UUID NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE,
+    source_request_id       UUID NOT NULL REFERENCES llm_requests(id),
+
+    original_provider       VARCHAR(100) NOT NULL,
+    original_model          VARCHAR(100) NOT NULL,
+    original_cost           NUMERIC(12,8) NOT NULL,
+    original_latency_ms     INT NOT NULL,
+    original_input_tokens   INT NOT NULL,
+    original_output_tokens  INT NOT NULL,
+
+    replay_response         TEXT,
+    replay_cost             NUMERIC(12,8),
+    replay_latency_ms       INT,
+    replay_input_tokens     INT,
+    replay_output_tokens    INT,
+
+    exact_match             BOOLEAN,
+    judge_equivalent        BOOLEAN,
+    judge_reason            TEXT,
+
+    error_message           TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_replay_results_run ON replay_results(replay_run_id, created_at);
+
+-- Supported LLM Providers and Models (refreshed by worker from majordomo-llm)
+CREATE TABLE IF NOT EXISTS llm_providers (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider    VARCHAR(100) NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS llm_models (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_id UUID NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+    model       VARCHAR(200) NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (provider_id, model)
+);
+CREATE INDEX IF NOT EXISTS idx_llm_models_provider ON llm_models(provider_id);
