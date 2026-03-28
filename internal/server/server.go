@@ -27,11 +27,12 @@ type Server struct {
 }
 
 type AdminConfig struct {
-	AdminHandler *api.AdminHandler
-	OAuthHandler *api.OAuthHandler
-	OrgHandler   *api.OrgHandler
-	JWTService   *auth.JWTService
-	CORSOrigins  []string
+	AdminHandler    *api.AdminHandler
+	OAuthHandler    *api.OAuthHandler
+	OrgHandler      *api.OrgHandler
+	WaitlistHandler *api.WaitlistHandler
+	JWTService      *auth.JWTService
+	CORSOrigins     []string
 }
 
 func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler, evalHandler *api.EvalHandler) *Server {
@@ -64,6 +65,10 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 
 			if adminCfg.OrgHandler != nil {
 				r.Post("/orgs/signup", adminCfg.OrgHandler.OrgSignup)
+			}
+
+			if adminCfg.WaitlistHandler != nil {
+				r.Post("/waitlist", adminCfg.WaitlistHandler.JoinWaitlist)
 			}
 
 			if adminCfg.OAuthHandler != nil {

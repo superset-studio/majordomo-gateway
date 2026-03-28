@@ -75,6 +75,45 @@ func (s *ResendSender) SendReset(to, link string) error {
     return err
 }
 
+func (s *ResendSender) SendWaitlistConfirmation(to string) error {
+    if s == nil || s.client == nil || to == "" {
+        return nil
+    }
+
+    subject := "Welcome to the Majordomo waitlist"
+    text := "Thanks for your interest in Majordomo Cloud. We're onboarding teams now and will be in touch shortly."
+    html := fmt.Sprintf(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>%[1]s</title>
+    <style>%[2]s</style>
+  </head>
+  <body>
+    <div class="container">
+      %[3]s
+      <div class="card">
+        <div class="badge">Early Access</div>
+        <div class="title">You're on the list</div>
+        <div class="muted">Thanks for your interest in Majordomo Cloud. We're onboarding teams now and a member of our team will be in touch shortly.</div>
+        <div class="footer">In the meantime, the open-source gateway is available today at github.com/superset-studio.</div>
+      </div>
+    </div>
+  </body>
+  </html>`, subject, emailStyles, emailBrandHeader)
+
+    params := &resend.SendEmailRequest{
+        From:    s.from,
+        To:      []string{to},
+        Subject: subject,
+        Html:    html,
+        Text:    text,
+    }
+    _, err := s.client.Emails.Send(params)
+    return err
+}
+
 func (s *ResendSender) SendVerification(to, link string) error {
     if s == nil || s.client == nil || to == "" || link == "" {
         return nil

@@ -229,3 +229,9 @@ type EmailVerificationStorage interface {
     GetEmailVerificationByToken(ctx context.Context, token string) (*models.EmailVerificationToken, error)
     MarkEmailVerificationUsed(ctx context.Context, id uuid.UUID) error
 }
+
+// WaitlistStorage defines operations for waitlist entries.
+type WaitlistStorage interface {
+    CreateWaitlistEntry(ctx context.Context, email string, source *string) (*models.WaitlistEntry, bool, error)
+    GetWaitlistEntryByEmail(ctx context.Context, email string) (*models.WaitlistEntry, error)
+}

@@ -491,3 +491,12 @@ ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gcs_credentials_json_encrypte
 -- One-time migration (run manually after applying schema):
 -- UPDATE users SET cloud_storage_provider = 's3' WHERE s3_bucket IS NOT NULL AND s3_bucket != '';
 -- UPDATE organizations SET cloud_storage_provider = 's3' WHERE s3_bucket IS NOT NULL AND s3_bucket != '';
+
+-- Waitlist entries for early access signups
+CREATE TABLE IF NOT EXISTS waitlist_entries (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email      VARCHAR(255) NOT NULL UNIQUE,
+    source     VARCHAR(100),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_waitlist_entries_email ON waitlist_entries (email);

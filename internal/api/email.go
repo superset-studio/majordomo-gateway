@@ -5,5 +5,6 @@ package api
 type EmailSender interface {
     SendReset(to, link string) error
     SendVerification(to, link string) error
+    SendWaitlistConfirmation(to string) error
 }
 

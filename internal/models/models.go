@@ -308,3 +308,11 @@ type CreateInviteInput struct {
 	Email string
 	Role  string
 }
+
+// WaitlistEntry represents a waitlist signup stored in the database.
+type WaitlistEntry struct {
+	ID        uuid.UUID  `json:"id" db:"id"`
+	Email     string     `json:"email" db:"email"`
+	Source    *string    `json:"source,omitempty" db:"source"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+}

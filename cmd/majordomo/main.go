@@ -196,11 +196,14 @@ func runServe(args []string) {
 			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc, store, emailSender, frontendURL)
 		}
 
+		waitlistHandler := api.NewWaitlistHandler(store, emailSender)
+
 		adminCfg = &server.AdminConfig{
-			AdminHandler: adminHandler,
-			OrgHandler:   orgHandler,
-			JWTService:   jwtSvc,
-			CORSOrigins:  cfg.CORS.AllowedOrigins,
+			AdminHandler:    adminHandler,
+			OrgHandler:      orgHandler,
+			WaitlistHandler: waitlistHandler,
+			JWTService:      jwtSvc,
+			CORSOrigins:     cfg.CORS.AllowedOrigins,
 		}
 
 		// Set up OAuth if any provider is configured
