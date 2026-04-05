@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -44,12 +44,11 @@ func runMetadataReindex(args []string) {
 	batchSize := fs.Int("batch-size", 1000, "Number of rows to update per batch")
 	fs.Parse(args)
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	ctx := context.Background()
 
-	// Determine which (api_key_id, key_name) pairs to process
 	type pair struct {
 		apiKeyID uuid.UUID
 		keyName  string
@@ -90,7 +89,6 @@ func runMetadataReindex(args []string) {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "API KEY ID\tKEY NAME\tROWS UPDATED")
-
 	for _, p := range pairs {
 		n, err := store.BackfillIndexedMetadata(ctx, p.apiKeyID, p.keyName, *batchSize)
 		if err != nil {
@@ -99,7 +97,6 @@ func runMetadataReindex(args []string) {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%d\n", p.apiKeyID, p.keyName, n)
 	}
-
 	w.Flush()
 	fmt.Println("\nDone.")
 }

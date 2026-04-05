@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -65,7 +65,7 @@ func runKeysCreate(args []string) {
 		os.Exit(1)
 	}
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	plaintext, hash, err := auth.GenerateAPIKey()
@@ -74,9 +74,7 @@ func runKeysCreate(args []string) {
 		os.Exit(1)
 	}
 
-	input := &models.CreateAPIKeyInput{
-		Name: *name,
-	}
+	input := &models.CreateAPIKeyInput{Name: *name}
 	if *description != "" {
 		input.Description = description
 	}
@@ -103,7 +101,7 @@ func runKeysList(args []string) {
 	configPath := fs.String("config", "", "Path to config file")
 	fs.Parse(args)
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	keys, err := store.ListAPIKeys(context.Background())
@@ -120,12 +118,8 @@ func runKeysList(args []string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tNAME\tSTATUS\tCREATED\tREQUESTS")
 	for _, k := range keys {
-		status := "active"
-		if !k.IsActive {
-			status = "revoked"
-		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
-			k.ID, k.Name, status,
+			k.ID, k.Name, apiKeyStatus(k),
 			k.CreatedAt.Format("2006-01-02"),
 			k.RequestCount)
 	}
@@ -143,14 +137,13 @@ func runKeysGet(args []string) {
 		os.Exit(1)
 	}
 
-	keyID := fs.Arg(0)
-	id, err := uuid.Parse(keyID)
+	id, err := uuid.Parse(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid key ID: %v\n", err)
 		os.Exit(1)
 	}
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	key, err := store.GetAPIKeyByID(context.Background(), id)
@@ -164,7 +157,7 @@ func runKeysGet(args []string) {
 	if key.Description != nil && *key.Description != "" {
 		fmt.Printf("Description:   %s\n", *key.Description)
 	}
-	fmt.Printf("Status:        %s\n", statusString(key))
+	fmt.Printf("Status:        %s\n", apiKeyStatus(key))
 	fmt.Printf("Created:       %s\n", key.CreatedAt.Format(time.RFC3339))
 	if key.RevokedAt != nil {
 		fmt.Printf("Revoked:       %s\n", key.RevokedAt.Format(time.RFC3339))
@@ -186,18 +179,16 @@ func runKeysRevoke(args []string) {
 		os.Exit(1)
 	}
 
-	keyID := fs.Arg(0)
-	id, err := uuid.Parse(keyID)
+	id, err := uuid.Parse(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid key ID: %v\n", err)
 		os.Exit(1)
 	}
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
-	err = store.RevokeAPIKey(context.Background(), id)
-	if err != nil {
+	if err := store.RevokeAPIKey(context.Background(), id); err != nil {
 		fmt.Fprintf(os.Stderr, "Error revoking key: %v\n", err)
 		os.Exit(1)
 	}
@@ -223,14 +214,13 @@ func runKeysUpdate(args []string) {
 		os.Exit(1)
 	}
 
-	keyID := fs.Arg(0)
-	id, err := uuid.Parse(keyID)
+	id, err := uuid.Parse(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: invalid key ID: %v\n", err)
 		os.Exit(1)
 	}
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	input := &models.UpdateAPIKeyInput{}
@@ -254,7 +244,7 @@ func runKeysUpdate(args []string) {
 	}
 }
 
-func statusString(key *models.APIKey) string {
+func apiKeyStatus(key *models.APIKey) string {
 	if !key.IsActive {
 		return "revoked"
 	}

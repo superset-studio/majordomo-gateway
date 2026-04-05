@@ -39,6 +39,10 @@ type Handler struct {
 	userCloudCache   sync.Map // userID (string) → *cachedCloudStorageConfig
 	orgCloudCache    sync.Map // orgID (string) → *cachedCloudStorageConfig
 	cloudCacheTTL    time.Duration
+
+	// Optional extension points — nil in the OSS binary.
+	policyEnforcer  PolicyEnforcer
+	requestEnricher RequestEnricher
 }
 
 type cachedCloudStorageConfig struct {
@@ -64,6 +68,7 @@ func NewHandler(
 	proxyResolver *auth.ProxyResolver,
 	sessionMgr *claudecode.SessionManager,
 	cfg *config.Config,
+	opts ...HandlerOption,
 ) *Handler {
 	providers := map[provider.Provider]string{
 		provider.ProviderOpenAI:    cfg.Providers.OpenAI.BaseURL,
@@ -71,7 +76,7 @@ func NewHandler(
 		provider.ProviderGemini:    cfg.Providers.Gemini.BaseURL,
 	}
 
-	return &Handler{
+	h := &Handler{
 		upstream:        NewUpstreamClient(cfg.Server.UpstreamTimeout, cfg.Server.StreamHeaderTimeout),
 		storage:         store,
 		s3Storage:       s3Storage,
@@ -87,6 +92,12 @@ func NewHandler(
 		providers:       providers,
 		cloudCacheTTL:   5 * time.Minute,
 	}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	return h
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +129,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if providerInfo.Provider == provider.ProviderUnknown {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini). Alternatively, set X-Majordomo-Provider header.")
 		return
+	}
+
+	// Policy enforcement (synchronous, pre-proxy).
+	if h.policyEnforcer != nil {
+		if violation := h.policyEnforcer.Enforce(ctx, PolicyContext{
+			RequestID:     requestID,
+			APIKeyID:      apiKeyInfo.ID,
+			UserID:        apiKeyInfo.UserID,
+			OrgID:         apiKeyInfo.OrgID,
+			Provider:      string(providerInfo.Provider),
+			RequestBody:   body,
+			CustomHeaders: headers,
+		}); violation != nil {
+			slog.Debug("request blocked by policy", "request_id", requestID, "status", violation.HTTPStatus)
+			httputil.WriteJSONError(w, violation.HTTPStatus, violation.Message)
+			return
+		}
 	}
 
 	// Check if Authorization header contains a proxy key
@@ -445,6 +473,22 @@ func (h *Handler) logRequest(
 	}
 
 	h.storage.WriteRequestLog(ctx, log)
+
+	// Post-response enrichment (async extension point).
+	// logRequest already runs in a background goroutine — no additional go needed.
+	if h.requestEnricher != nil {
+		h.requestEnricher.Enrich(ctx, EnrichmentEvent{
+			RequestID:     log.ID,
+			APIKeyID:      apiKeyInfo.ID,
+			UserID:        apiKeyInfo.UserID,
+			OrgID:         apiKeyInfo.OrgID,
+			Provider:      string(providerInfo.Provider),
+			RequestBody:   reqBody,
+			ResponseBody:  resp.Body,
+			CustomHeaders: customHeaders,
+			StatusCode:    resp.StatusCode,
+		})
+	}
 }
 
 // extractProviderKeyInfo extracts and hashes the provider API key from the Authorization header

@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -53,7 +53,6 @@ func runUsersCreate(args []string) {
 		fs.Usage()
 		os.Exit(1)
 	}
-
 	if *password == "" {
 		fmt.Fprintln(os.Stderr, "Error: --password is required")
 		fs.Usage()
@@ -65,7 +64,7 @@ func runUsersCreate(args []string) {
 		userEmail = *username
 	}
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	input := &models.CreateUserInput{
@@ -80,7 +79,6 @@ func runUsersCreate(args []string) {
 		os.Exit(1)
 	}
 
-	// CLI-created users are auto-verified
 	if err := store.MarkUserEmailVerified(context.Background(), user.ID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to mark email as verified: %v\n", err)
 	}
@@ -98,7 +96,7 @@ func runUsersList(args []string) {
 	configPath := fs.String("config", "", "Path to config file")
 	fs.Parse(args)
 
-	store := connectDB(*configPath, nil)
+	store := connectDB(*configPath)
 	defer store.Close()
 
 	users, err := store.ListUsers(context.Background())
