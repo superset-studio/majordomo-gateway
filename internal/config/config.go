@@ -37,6 +37,10 @@ type OAuthProviderConfig struct {
 type JWTConfig struct {
 	Secret string        `mapstructure:"secret"`
 	Expiry time.Duration `mapstructure:"expiry"`
+	// AdminUsernames lists usernames allowed to call programmatic
+	// admin-only endpoints (e.g. POST /api/v1/admin/users). Empty disables
+	// those endpoints entirely.
+	AdminUsernames []string `mapstructure:"admin_usernames"`
 }
 
 type CORSConfig struct {

@@ -17,6 +17,7 @@ var (
 	ErrInvalidAPIKey  = errors.New("invalid API key")
 	ErrAPIKeyRevoked  = errors.New("API key has been revoked")
 	ErrAPIKeyInactive = errors.New("API key is not active")
+	ErrUserInactive   = errors.New("API key owner is not active")
 )
 
 type cachedKey struct {
@@ -27,14 +28,19 @@ type cachedKey struct {
 
 type Resolver struct {
 	storage  storage.APIKeyStorage
+	users    storage.UserStorage // optional; nil disables the user-active check
 	cache    map[string]*cachedKey
 	cacheMu  sync.RWMutex
 	cacheTTL time.Duration
 }
 
-func NewResolver(storage storage.APIKeyStorage) *Resolver {
+// NewResolver builds an api-key resolver. Pass a UserStorage to also reject
+// keys whose owning user is deactivated; pass nil to skip that check (legacy
+// behavior). Keys with a NULL user_id are unaffected either way.
+func NewResolver(storage storage.APIKeyStorage, users storage.UserStorage) *Resolver {
 	return &Resolver{
 		storage:  storage,
+		users:    users,
 		cache:    make(map[string]*cachedKey),
 		cacheTTL: 5 * time.Minute,
 	}
@@ -72,6 +78,19 @@ func (r *Resolver) ResolveAPIKey(ctx context.Context, apiKey string) (*models.AP
 			return nil, ErrAPIKeyRevoked
 		}
 		return nil, ErrAPIKeyInactive
+	}
+
+	// If the key is owned by a user, refuse it when the user is deactivated.
+	// Keys with NULL user_id (legacy / org-only) skip this check.
+	if r.users != nil && key.UserID != nil {
+		user, uerr := r.users.GetUserByID(ctx, *key.UserID)
+		if uerr != nil {
+			return nil, uerr
+		}
+		if user != nil && !user.IsActive {
+			r.cacheInvalid(hash)
+			return nil, ErrUserInactive
+		}
 	}
 
 	info := &models.APIKeyInfo{

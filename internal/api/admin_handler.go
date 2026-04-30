@@ -892,6 +892,137 @@ func (h *AdminHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusCreated, adminCreateAPIKeyResponse{APIKey: key, Key: plaintext})
 }
 
+// --- Programmatic User Provisioning (admin-only) ---
+
+type adminCreateUserRequest struct {
+	Username string  `json:"username"`
+	Email    *string `json:"email,omitempty"`
+}
+
+// CreateUserAdmin handles POST /api/v1/admin/users.
+//
+// Creates a passwordless user record intended for machine-managed
+// identities (e.g. customers of a service that fronts majordomo). The
+// user has no password_hash, so:
+//   - direct password login is rejected ("this account uses OAuth sign-in")
+//   - password reset silently no-ops
+//   - OAuth login keys on (provider, provider_id), not email, so a
+//     coincidental email match cannot take over the account
+//
+// Caller must be in MAJORDOMO_ADMIN_USERNAMES (enforced upstream by
+// AdminOnlyMiddleware).
+func (h *AdminHandler) CreateUserAdmin(w http.ResponseWriter, r *http.Request) {
+	var req adminCreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Username == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "username is required")
+		return
+	}
+
+	// Conflict checks — return 409 (vs. an opaque 500 from a uniqueness
+	// constraint) so callers can distinguish "already exists" from "broken".
+	existing, err := h.users.GetUserByUsername(r.Context(), req.Username)
+	if err != nil {
+		slog.Error("failed to check existing user", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existing != nil {
+		httputil.WriteJSONError(w, http.StatusConflict, "username already exists")
+		return
+	}
+	if req.Email != nil && *req.Email != "" {
+		existing, err := h.users.GetUserByEmail(r.Context(), *req.Email)
+		if err != nil {
+			slog.Error("failed to check existing email", "error", err)
+			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if existing != nil {
+			httputil.WriteJSONError(w, http.StatusConflict, "email already exists")
+			return
+		}
+	}
+
+	input := &models.CreateUserInput{
+		Username: req.Username,
+		// Empty string maps to NULL in storage layer.
+		Password: "",
+	}
+	if req.Email != nil {
+		input.Email = *req.Email
+	}
+
+	user, err := h.users.CreateUser(r.Context(), input)
+	if err != nil {
+		slog.Error("failed to create admin-managed user", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusCreated, user)
+}
+
+// CreateAPIKeyForUser handles POST /api/v1/admin/users/{userID}/api-keys.
+//
+// Mints an api_key owned by the user identified in the URL, on behalf of
+// the admin caller. Used by upstream services (e.g. an LLM gateway client)
+// to provision keys for their own customers without having to log those
+// customers in. Caller must be in MAJORDOMO_ADMIN_USERNAMES.
+func (h *AdminHandler) CreateAPIKeyForUser(w http.ResponseWriter, r *http.Request) {
+	targetID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	var req adminCreateAPIKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		httputil.WriteJSONError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	user, err := h.users.GetUserByID(r.Context(), targetID)
+	if err != nil {
+		slog.Error("failed to look up target user", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if user == nil {
+		httputil.WriteJSONError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	plaintext, hash, err := auth.GenerateAPIKey()
+	if err != nil {
+		slog.Error("failed to generate API key", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	input := &models.CreateAPIKeyInput{
+		Name:        req.Name,
+		Description: req.Description,
+		UserID:      &user.ID,
+	}
+
+	key, err := h.apiKeys.CreateAPIKey(r.Context(), hash, input)
+	if err != nil {
+		slog.Error("failed to create API key for user", "error", err, "target_user", user.ID)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusCreated, adminCreateAPIKeyResponse{APIKey: key, Key: plaintext})
+}
+
 // GetAPIKey handles GET /api/v1/admin/api-keys/{id}
 func (h *AdminHandler) GetAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())

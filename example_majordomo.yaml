@@ -54,6 +54,11 @@ providers:
 jwt:
   secret: ""      # Required to enable web UI. Use a random string (>= 32 chars): openssl rand -base64 32
   expiry: 24h
+  # Allowlist of usernames permitted to call programmatic admin-only
+  # endpoints (POST /api/v1/admin/users, POST /api/v1/admin/users/{id}/api-keys).
+  # Used to provision machine-managed identities from an upstream service.
+  # Empty/unset disables those endpoints entirely.
+  admin_usernames: []  # e.g. ["aiagents"]
 
 cors:
   allowed_origins: []  # e.g., ["http://localhost:6785"] for Vite dev server
