@@ -15,10 +15,12 @@ A lightweight LLM API gateway that proxies requests to upstream providers (OpenA
 - **Custom metadata** - Attach custom headers (`X-Majordomo-*`) for tracking by user, feature, environment, etc.
 - **Body storage** - Optionally store full request/response bodies in S3 or PostgreSQL
 - **Zero-config provider detection** - Automatically detects provider from request path
+- **A/B testing** - Split live traffic between model variants with weighted random or sticky assignment
 
 ## Documentation
 
 - **[Getting Started Guide](docs/getting-started.md)** - Full walkthrough with SDK integration examples
+- **[A/B Testing](docs/experiments.md)** - Split live traffic between model variants
 
 ## Quick Start
 
@@ -257,12 +259,13 @@ docker run -p 7680:7680 \
 1. Client sends request with `X-Majordomo-Key` header
 2. Gateway validates the API key against the database (returns 401 if invalid/revoked)
 3. Gateway detects provider from path or `X-Majordomo-Provider` header
-4. Request is forwarded to upstream provider
-5. Response is parsed for token usage
-6. Cost is calculated using current pricing data
-7. Request log is written to PostgreSQL asynchronously (linked to API key)
-8. (Optional) Full request/response bodies stored in S3
-9. Response is returned to client
+4. (Optional) Active experiment is checked — model field rewritten if a variant is selected
+5. Request is forwarded to upstream provider
+6. Response is parsed for token usage
+7. Cost is calculated using current pricing data
+8. Request log is written to PostgreSQL asynchronously (linked to API key)
+9. (Optional) Full request/response bodies stored in S3
+10. Response is returned to client
 
 ## Database schema
 

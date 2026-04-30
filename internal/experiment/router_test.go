@@ -146,7 +146,9 @@ func TestRoute_RewritesModel(t *testing.T) {
 
 	// Check body was rewritten
 	var parsed map[string]interface{}
-	json.Unmarshal(result.RewrittenBody, &parsed)
+	if err := json.Unmarshal(result.RewrittenBody, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal rewritten body: %v", err)
+	}
 	if parsed["model"] != "gpt-4o-mini" {
 		t.Fatalf("expected model 'gpt-4o-mini' in rewritten body, got %v", parsed["model"])
 	}
@@ -180,7 +182,9 @@ func TestRoute_PreservesBodyFields(t *testing.T) {
 	}
 
 	var parsed map[string]interface{}
-	json.Unmarshal(result.RewrittenBody, &parsed)
+	if err := json.Unmarshal(result.RewrittenBody, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal rewritten body: %v", err)
+	}
 
 	if parsed["temperature"] != 0.7 {
 		t.Fatalf("temperature should be preserved, got %v", parsed["temperature"])
@@ -276,7 +280,9 @@ func TestRewriteModelInBody(t *testing.T) {
 	}
 
 	var parsed map[string]interface{}
-	json.Unmarshal(rewritten, &parsed)
+	if err := json.Unmarshal(rewritten, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal rewritten body: %v", err)
+	}
 	if parsed["model"] != "claude-opus-4-6" {
 		t.Fatalf("expected model claude-opus-4-6, got %v", parsed["model"])
 	}
