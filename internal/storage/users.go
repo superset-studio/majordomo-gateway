@@ -16,11 +16,29 @@ var (
 
 const userColumns = `id, username, password_hash, email, auth_provider, auth_provider_id, is_active, email_verified, created_at, s3_bucket, s3_region, s3_endpoint, s3_access_key_id_encrypted, s3_secret_access_key_encrypted`
 
-// CreateUser creates a new user with a bcrypt-hashed password
+// CreateUser creates a new user. Password is bcrypt-hashed when supplied;
+// an empty password yields a NULL password_hash, which the login flow
+// rejects with "this account uses OAuth sign-in". Use this for
+// machine-managed identities that should never log in directly.
 func (s *PostgresStorage) CreateUser(ctx context.Context, input *models.CreateUserInput) (*models.User, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 12)
-	if err != nil {
-		return nil, err
+	var passwordHash any
+	if input.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 12)
+		if err != nil {
+			return nil, err
+		}
+		passwordHash = string(hash)
+	} else {
+		passwordHash = nil
+	}
+
+	// Email is optional for machine-managed users; treat empty string as NULL
+	// to play nicely with the partial unique index on users(email).
+	var emailParam any
+	if input.Email != "" {
+		emailParam = input.Email
+	} else {
+		emailParam = nil
 	}
 
 	query := `
@@ -29,7 +47,7 @@ func (s *PostgresStorage) CreateUser(ctx context.Context, input *models.CreateUs
 		RETURNING ` + userColumns
 
 	var user models.User
-	err = s.db.QueryRowxContext(ctx, query, input.Username, input.Email, string(hash)).StructScan(&user)
+	err := s.db.QueryRowxContext(ctx, query, input.Username, emailParam, passwordHash).StructScan(&user)
 	if err != nil {
 		return nil, err
 	}

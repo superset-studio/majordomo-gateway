@@ -33,6 +33,9 @@ type AdminConfig struct {
 	WaitlistHandler *api.WaitlistHandler
 	JWTService      *auth.JWTService
 	CORSOrigins     []string
+	// AdminUsernames gates programmatic admin-only endpoints (POST /users,
+	// POST /users/{id}/api-keys). Empty disables them.
+	AdminUsernames []string
 }
 
 func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler, evalHandler *api.EvalHandler) *Server {
@@ -93,6 +96,17 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 				r.Delete("/me/provider-keys/{provider}", adminCfg.AdminHandler.DeleteProviderKey)
 				r.Get("/api-keys", adminCfg.AdminHandler.ListAPIKeys)
 				r.Post("/api-keys", adminCfg.AdminHandler.CreateAPIKey)
+
+				// Programmatic provisioning — admin allowlist only. Used by
+				// upstream services (e.g. an LLM gateway client) to manage
+				// machine-owned identities for their customers.
+				if len(adminCfg.AdminUsernames) > 0 {
+					r.Group(func(r chi.Router) {
+						r.Use(api.AdminOnlyMiddleware(adminCfg.AdminUsernames))
+						r.Post("/users", adminCfg.AdminHandler.CreateUserAdmin)
+						r.Post("/users/{userID}/api-keys", adminCfg.AdminHandler.CreateAPIKeyForUser)
+					})
+				}
 				r.Get("/api-keys/{id}", adminCfg.AdminHandler.GetAPIKey)
 				r.Put("/api-keys/{id}", adminCfg.AdminHandler.UpdateAPIKey)
 				r.Delete("/api-keys/{id}", adminCfg.AdminHandler.RevokeAPIKey)

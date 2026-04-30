@@ -140,7 +140,9 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 		slog.Info("S3 body storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
 	}
 
-	resolver := auth.NewResolver(store)
+	// `store` satisfies both APIKeyStorage and UserStorage; passing it for
+	// users enables the "owner inactive" check inside the resolver.
+	resolver := auth.NewResolver(store, store)
 
 	var proxyResolver *auth.ProxyResolver
 	var apiHandler *api.Handler
@@ -232,6 +234,7 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 			WaitlistHandler: waitlistHandler,
 			JWTService:      jwtSvc,
 			CORSOrigins:     cfg.CORS.AllowedOrigins,
+			AdminUsernames:  cfg.JWT.AdminUsernames,
 		}
 
 		if cfg.OAuth.GitHub.ClientID != "" || cfg.OAuth.Google.ClientID != "" {
