@@ -14,6 +14,7 @@ import (
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
 	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
+	"github.com/superset-studio/majordomo-gateway/internal/experiment"
 	"github.com/superset-studio/majordomo-gateway/internal/httputil"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
@@ -41,8 +42,9 @@ type Handler struct {
 	cloudCacheTTL    time.Duration
 
 	// Optional extension points — nil in the OSS binary.
-	policyEnforcer  PolicyEnforcer
-	requestEnricher RequestEnricher
+	policyEnforcer   PolicyEnforcer
+	requestEnricher  RequestEnricher
+	experimentRouter *experiment.Router
 }
 
 type cachedCloudStorageConfig struct {
@@ -129,6 +131,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if providerInfo.Provider == provider.ProviderUnknown {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "unrecognized request path; supported paths: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses (OpenAI), /v1/messages (Anthropic), /<model>:generateContent (Gemini). Alternatively, set X-Majordomo-Provider header.")
 		return
+	}
+
+	// Experiment routing (A/B testing): select a variant and rewrite the model.
+	var experimentResult *experiment.RoutingResult
+	if h.experimentRouter != nil {
+		experimentResult = h.experimentRouter.Route(ctx, experiment.RoutingContext{
+			APIKeyID: apiKeyInfo.ID,
+			UserID:   apiKeyInfo.UserID,
+			OrgID:    apiKeyInfo.OrgID,
+			Provider: providerInfo.Provider,
+			Body:     body,
+			Headers:  headers,
+		})
+		if experimentResult != nil {
+			body = experimentResult.RewrittenBody
+			if experimentResult.ProviderChanged {
+				providerInfo = experimentResult.NewProviderInfo
+			}
+		}
 	}
 
 	// Policy enforcement (synchronous, pre-proxy).
@@ -247,7 +268,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ResponseTime: streamResp.ResponseTime,
 			}
 
-			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+			h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentResult)
 			return
 		}
 
@@ -312,7 +333,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	w.Write(responseBody)
 
-	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers)
+	h.logAndFinish(r, requestID, apiKeyInfo, providerKeyInfo, proxyKeyID, providerInfo, body, resp, requestedAt, respondedAt, headers, experimentResult)
 }
 
 // logAndFinish extracts session metadata from request headers and dispatches
@@ -328,7 +349,14 @@ func (h *Handler) logAndFinish(
 	resp *UpstreamResponse,
 	requestedAt, respondedAt time.Time,
 	headers map[string]string,
+	experimentResult *experiment.RoutingResult,
 ) {
+	// Inject experiment metadata into headers so it flows into raw_metadata / indexed_metadata.
+	if experimentResult != nil {
+		headers["x-majordomo-_experiment-id"] = experimentResult.ExperimentID.String()
+		headers["x-majordomo-_experiment-variant"] = experimentResult.VariantName
+		headers["x-majordomo-_experiment-original-model"] = experimentResult.OriginalModel
+	}
 	// Extract Claude Code session ID if present
 	var sessionID *uuid.UUID
 	if sid := r.Header.Get("X-Majordomo-ClaudeCode-Session-Id"); sid != "" {

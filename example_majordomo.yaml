@@ -73,3 +73,9 @@ email:
   resend_api_key: ""      # Or set MAJORDOMO_EMAIL_RESEND_API_KEY
   from: ""                # Or set MAJORDOMO_EMAIL_FROM (e.g., "Majordomo <no-reply@yourdomain.com>")
   frontend_url: ""        # Or set MAJORDOMO_EMAIL_FRONTEND_URL (used to build reset links)
+
+# Experiments (A/B testing) — disabled by default
+# When enabled, experiments are managed via the Admin API.
+# experiments:
+#   enabled: false          # Or set MAJORDOMO_EXPERIMENTS_ENABLED=true
+#   cache_ttl: 5m           # How long to cache active experiments (default: 5m)

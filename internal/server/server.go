@@ -35,7 +35,7 @@ type AdminConfig struct {
 	CORSOrigins     []string
 }
 
-func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler, evalHandler *api.EvalHandler) *Server {
+func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthChecker, apiHandler *api.Handler, resolver *auth.Resolver, adminCfg *AdminConfig, claudeHandler *api.ClaudeSessionHandler, usageHandler *api.UsageHandler, metadataHandler *api.MetadataHandler, claudeAnalyticsHandler *api.ClaudeAnalyticsHandler, replayHandler *api.ReplayHandler, evalHandler *api.EvalHandler, experimentHandler *api.ExperimentHandler) *Server {
 	s := &Server{
 		config:        cfg,
 		healthChecker: checker,
@@ -158,6 +158,21 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 					r.Post("/eval/runs/{id}/cancel", evalHandler.CancelRun)
 					r.Get("/eval/runs/{id}/results", evalHandler.ListResults)
 					r.Get("/eval/runs/{id}/results/{resultId}", evalHandler.GetResult)
+				}
+
+				if experimentHandler != nil {
+					r.Post("/experiments", experimentHandler.Create)
+					r.Get("/experiments", experimentHandler.List)
+					r.Get("/experiments/{id}", experimentHandler.Get)
+					r.Put("/experiments/{id}", experimentHandler.Update)
+					r.Delete("/experiments/{id}", experimentHandler.Delete)
+					r.Post("/experiments/{id}/variants", experimentHandler.AddVariant)
+					r.Put("/experiments/{id}/variants/{variantId}", experimentHandler.UpdateVariant)
+					r.Delete("/experiments/{id}/variants/{variantId}", experimentHandler.DeleteVariant)
+					r.Post("/experiments/{id}/activate", experimentHandler.Activate)
+					r.Post("/experiments/{id}/pause", experimentHandler.Pause)
+					r.Post("/experiments/{id}/complete", experimentHandler.Complete)
+					r.Post("/experiments/{id}/results", experimentHandler.GetResults)
 				}
 
 				if adminCfg.OrgHandler != nil {

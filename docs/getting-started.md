@@ -458,4 +458,5 @@ SELECT s3_key FROM llm_requests WHERE id = '550e8400-e29b-41d4-a716-446655440000
 ## Next Steps
 
 - **Production deployment**: See the [Deployment guide](deployment.md) for Docker Compose, standalone Docker, and Kubernetes health probes
+- **A/B testing**: See the [Experiments guide](experiments.md) to split live traffic between model variants
 - **Pricing updates**: The gateway fetches pricing hourly from llm-prices.com automatically

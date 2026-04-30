@@ -500,3 +500,51 @@ CREATE TABLE IF NOT EXISTS waitlist_entries (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_waitlist_entries_email ON waitlist_entries (email);
+
+-- ============================================================
+-- Experiment Routing (A/B Testing)
+-- ============================================================
+
+-- Experiments: A/B test definitions scoped to a user or org
+CREATE TABLE IF NOT EXISTS experiments (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id           UUID REFERENCES users(id),
+    org_id            UUID REFERENCES organizations(id),
+    api_key_id        UUID REFERENCES api_keys(id),  -- NULL = all keys for this user/org
+    name              VARCHAR(255) NOT NULL,
+    description       TEXT,
+    status            VARCHAR(20) NOT NULL DEFAULT 'draft',  -- draft, active, paused, completed
+    sticky            BOOLEAN NOT NULL DEFAULT false,
+    sticky_key_header VARCHAR(255),  -- custom header name for sticky identity (optional)
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (user_id IS NOT NULL OR org_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_experiments_user_status ON experiments(user_id, status) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_experiments_org_status ON experiments(org_id, status) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_experiments_api_key ON experiments(api_key_id, status) WHERE api_key_id IS NOT NULL;
+
+-- Experiment Variants: each variant targets a specific provider + model with a relative weight
+CREATE TABLE IF NOT EXISTS experiment_variants (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id   UUID NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+    name            VARCHAR(255) NOT NULL,
+    provider        VARCHAR(100) NOT NULL,
+    model           VARCHAR(200) NOT NULL,
+    weight          INT NOT NULL DEFAULT 1,
+    is_control      BOOLEAN NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (experiment_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_variants_experiment ON experiment_variants(experiment_id);
+
+-- Experiment Assignments: sticky variant assignments for consistent routing
+CREATE TABLE IF NOT EXISTS experiment_assignments (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    experiment_id   UUID NOT NULL REFERENCES experiments(id) ON DELETE CASCADE,
+    variant_id      UUID NOT NULL REFERENCES experiment_variants(id) ON DELETE CASCADE,
+    subject_hash    VARCHAR(64) NOT NULL,  -- SHA256 of the sticky identity
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (experiment_id, subject_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_experiment_assignments_lookup ON experiment_assignments(experiment_id, subject_hash);
