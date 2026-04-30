@@ -9,18 +9,19 @@ import (
 )
 
 type Config struct {
-    Server    ServerConfig    `mapstructure:"server"`
-    Storage   StorageConfig   `mapstructure:"storage"`
-    Logging   LoggingConfig   `mapstructure:"logging"`
-    Pricing   PricingConfig   `mapstructure:"pricing"`
-    Providers ProvidersConfig `mapstructure:"providers"`
-    S3        S3Config        `mapstructure:"s3"`
-    Metadata  MetadataConfig  `mapstructure:"metadata"`
-    Secrets   SecretsConfig   `mapstructure:"secrets"`
-    JWT       JWTConfig       `mapstructure:"jwt"`
-    CORS      CORSConfig      `mapstructure:"cors"`
-    OAuth     OAuthConfig     `mapstructure:"oauth"`
-    Email     EmailConfig     `mapstructure:"email"`
+    Server      ServerConfig      `mapstructure:"server"`
+    Storage     StorageConfig     `mapstructure:"storage"`
+    Logging     LoggingConfig     `mapstructure:"logging"`
+    Pricing     PricingConfig     `mapstructure:"pricing"`
+    Providers   ProvidersConfig   `mapstructure:"providers"`
+    S3          S3Config          `mapstructure:"s3"`
+    Metadata    MetadataConfig    `mapstructure:"metadata"`
+    Secrets     SecretsConfig     `mapstructure:"secrets"`
+    JWT         JWTConfig         `mapstructure:"jwt"`
+    CORS        CORSConfig        `mapstructure:"cors"`
+    OAuth       OAuthConfig       `mapstructure:"oauth"`
+    Email       EmailConfig       `mapstructure:"email"`
+    Experiments ExperimentsConfig `mapstructure:"experiments"`
 }
 
 type OAuthConfig struct {
@@ -152,6 +153,11 @@ type BedrockConfig struct {
 	Region string `mapstructure:"region"`
 }
 
+type ExperimentsConfig struct {
+	Enabled  bool          `mapstructure:"enabled"`
+	CacheTTL time.Duration `mapstructure:"cache_ttl"`
+}
+
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
@@ -246,4 +252,7 @@ func setDefaults(v *viper.Viper) {
     v.SetDefault("email.resend_api_key", "")
     v.SetDefault("email.from", "")
     v.SetDefault("email.frontend_url", "")
+
+	v.SetDefault("experiments.enabled", false)
+	v.SetDefault("experiments.cache_ttl", 5*time.Minute)
 }

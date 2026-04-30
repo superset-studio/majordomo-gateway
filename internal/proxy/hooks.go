@@ -1,6 +1,9 @@
 package proxy
 
-import "github.com/superset-studio/majordomo-gateway/extension"
+import (
+	"github.com/superset-studio/majordomo-gateway/extension"
+	"github.com/superset-studio/majordomo-gateway/internal/experiment"
+)
 
 // Type aliases so internal proxy code can reference these without the extension
 // package prefix, while external modules consume them via extension.*.
@@ -21,4 +24,9 @@ func WithPolicyEnforcer(e extension.PolicyEnforcer) HandlerOption {
 // WithRequestEnricher attaches an async post-response enricher.
 func WithRequestEnricher(e extension.RequestEnricher) HandlerOption {
 	return func(h *Handler) { h.requestEnricher = e }
+}
+
+// WithExperimentRouter attaches an A/B testing experiment router.
+func WithExperimentRouter(r *experiment.Router) HandlerOption {
+	return func(h *Handler) { h.experimentRouter = r }
 }

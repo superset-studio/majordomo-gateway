@@ -15,9 +15,10 @@ import (
 	"github.com/superset-studio/majordomo-gateway/extension"
 	"github.com/superset-studio/majordomo-gateway/internal/api"
 	"github.com/superset-studio/majordomo-gateway/internal/auth"
-	apiemail "github.com/superset-studio/majordomo-gateway/internal/email"
 	"github.com/superset-studio/majordomo-gateway/internal/claudecode"
 	"github.com/superset-studio/majordomo-gateway/internal/config"
+	apiemail "github.com/superset-studio/majordomo-gateway/internal/email"
+	"github.com/superset-studio/majordomo-gateway/internal/experiment"
 	"github.com/superset-studio/majordomo-gateway/internal/pricing"
 	"github.com/superset-studio/majordomo-gateway/internal/proxy"
 	"github.com/superset-studio/majordomo-gateway/internal/secrets"
@@ -174,6 +175,13 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 		handlerOpts = append(handlerOpts, proxy.WithRequestEnricher(o.requestEnricher))
 	}
 
+	var experimentRouter *experiment.Router
+	if cfg.Experiments.Enabled {
+		experimentRouter = experiment.NewRouter(store, cfg.Experiments.CacheTTL)
+		handlerOpts = append(handlerOpts, proxy.WithExperimentRouter(experimentRouter))
+		slog.Info("experiment routing (A/B testing) enabled")
+	}
+
 	proxyHandler := proxy.NewHandler(
 		store, s3Storage, userBodyStorage, store, store,
 		proxySecretStore, pricingSvc, resolver, proxyResolver, sessionMgr, cfg,
@@ -186,6 +194,7 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 	var claudeAnalyticsHandler *api.ClaudeAnalyticsHandler
 	var replayHandler *api.ReplayHandler
 	var evalHandler *api.EvalHandler
+	var experimentHandler *api.ExperimentHandler
 
 	if cfg.JWT.Secret != "" {
 		jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiry)
@@ -218,6 +227,9 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
 		replayHandler = api.NewReplayHandler(store, store)
 		evalHandler = api.NewEvalHandler(store, store)
+		if experimentRouter != nil {
+			experimentHandler = api.NewExperimentHandler(store, store, experimentRouter)
+		}
 
 		var orgHandler *api.OrgHandler
 		if adminSecretStore != nil {
@@ -249,7 +261,7 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 	srv := server.New(
 		&cfg.Server, proxyHandler, store, apiHandler, resolver,
 		adminCfg, claudeHandler, usageHandler, metadataHandler,
-		claudeAnalyticsHandler, replayHandler, evalHandler,
+		claudeAnalyticsHandler, replayHandler, evalHandler, experimentHandler,
 	)
 
 	return &Server{
