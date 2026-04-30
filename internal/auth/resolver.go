@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/superset-studio/majordomo-gateway/internal/models"
 	"github.com/superset-studio/majordomo-gateway/internal/storage"
 )
@@ -19,6 +19,15 @@ var (
 	ErrAPIKeyInactive = errors.New("API key is not active")
 )
 
+// resolverCacheSize bounds the in-memory api-key resolver cache. Sized
+// for ~hundreds of active customers per pod with comfortable headroom
+// for transient probes / rotated keys before LRU eviction kicks in.
+//
+// At ~200 bytes per entry (hash key + cachedKey struct + APIKeyInfo),
+// 4096 entries is ~800 KB — trivial — and gives 8x slack over a typical
+// hundreds-of-customers fleet.
+const resolverCacheSize = 4096
+
 type cachedKey struct {
 	info      *models.APIKeyInfo
 	expiresAt time.Time
@@ -27,15 +36,16 @@ type cachedKey struct {
 
 type Resolver struct {
 	storage  storage.APIKeyStorage
-	cache    map[string]*cachedKey
-	cacheMu  sync.RWMutex
+	cache    *lru.Cache[string, *cachedKey]
 	cacheTTL time.Duration
 }
 
 func NewResolver(storage storage.APIKeyStorage) *Resolver {
+	// lru.New only fails for size <= 0; size is a compile-time constant > 0.
+	cache, _ := lru.New[string, *cachedKey](resolverCacheSize)
 	return &Resolver{
 		storage:  storage,
-		cache:    make(map[string]*cachedKey),
+		cache:    cache,
 		cacheTTL: 5 * time.Minute,
 	}
 }
@@ -94,49 +104,41 @@ func (r *Resolver) ResolveAPIKey(ctx context.Context, apiKey string) (*models.AP
 	return info, nil
 }
 
+// getFromCache returns the cached entry for hash if present and unexpired.
+// Stale entries are evicted on access so the LRU's recency tracking stays
+// in sync with logical validity (an expired entry shouldn't keep a "fresh"
+// slot warm just because it was recently accessed).
 func (r *Resolver) getFromCache(hash string) *cachedKey {
-	r.cacheMu.RLock()
-	defer r.cacheMu.RUnlock()
-
-	cached, ok := r.cache[hash]
+	cached, ok := r.cache.Get(hash)
 	if !ok {
 		return nil
 	}
-
 	if time.Now().After(cached.expiresAt) {
-		return nil // Expired
+		r.cache.Remove(hash)
+		return nil
 	}
-
 	return cached
 }
 
 func (r *Resolver) cacheValid(hash string, info *models.APIKeyInfo) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-
-	r.cache[hash] = &cachedKey{
+	r.cache.Add(hash, &cachedKey{
 		info:      info,
 		expiresAt: time.Now().Add(r.cacheTTL),
 		isValid:   true,
-	}
+	})
 }
 
 func (r *Resolver) cacheInvalid(hash string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-
-	r.cache[hash] = &cachedKey{
+	r.cache.Add(hash, &cachedKey{
 		info:      nil,
 		expiresAt: time.Now().Add(r.cacheTTL),
 		isValid:   false,
-	}
+	})
 }
 
 // InvalidateCache removes a specific key from the cache (call after revocation)
 func (r *Resolver) InvalidateCache(hash string) {
-	r.cacheMu.Lock()
-	defer r.cacheMu.Unlock()
-	delete(r.cache, hash)
+	r.cache.Remove(hash)
 }
 
 // HashAPIKey computes SHA256 hash of an API key
