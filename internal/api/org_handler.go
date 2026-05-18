@@ -505,10 +505,6 @@ func (h *OrgHandler) UpdateOrgS3Config(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required")
 		return
 	}
-	if req.AccessKeyID == "" || req.SecretAccessKey == "" {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required")
-		return
-	}
 
 	if h.secrets == nil {
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
@@ -520,27 +516,31 @@ func (h *OrgHandler) UpdateOrgS3Config(w http.ResponseWriter, r *http.Request) {
 		region = "us-east-1"
 	}
 
-	encAccessKeyID, err := h.secrets.Encrypt(req.AccessKeyID)
+	// Partial update: if AccessKeyID/SecretAccessKey is blank and the org has
+	// existing encrypted creds saved, reuse them instead of rejecting.
+	existingOrg, err := h.orgs.GetOrgCloudStorageConfig(r.Context(), *claims.OrgID)
 	if err != nil {
-		slog.Error("failed to encrypt S3 access key ID", "error", err)
+		slog.Error("failed to load existing org storage config", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-
-	encSecretAccessKey, err := h.secrets.Encrypt(req.SecretAccessKey)
-	if err != nil {
-		slog.Error("failed to encrypt S3 secret access key", "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+	merged, status, errMsg := mergeS3Credentials(req.AccessKeyID, req.SecretAccessKey, orgStorageView{o: existingOrg}, h.secrets, "")
+	if errMsg != "" {
+		httputil.WriteJSONError(w, status, errMsg)
 		return
 	}
+	encAccessKeyID := merged.encryptedAccessKeyID
+	encSecretAccessKey := merged.encryptedSecretAccessKey
 
-	// Validate S3 connectivity before saving
+	// Validate S3 connectivity before saving — use the merged plaintext so
+	// region/endpoint/bucket changes are exercised with credentials that
+	// actually exist.
 	if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
 		Bucket:         req.Bucket,
 		Region:         region,
 		Endpoint:       req.Endpoint,
-		AccessKeyID:    req.AccessKeyID,
-		SecretAccessKey: req.SecretAccessKey,
+		AccessKeyID:    merged.accessKeyID,
+		SecretAccessKey: merged.secretAccessKey,
 	}); err != nil {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
 		return
@@ -624,36 +624,34 @@ func (h *OrgHandler) UpdateOrgCloudStorageConfig(w http.ResponseWriter, r *http.
 		gcsBucket, gcsProjectID, encGCSCredJSON                          string
 	)
 
+	existingOrg, err := h.orgs.GetOrgCloudStorageConfig(r.Context(), *claims.OrgID)
+	if err != nil {
+		slog.Error("failed to load existing org cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	existing := orgStorageView{o: existingOrg}
+
 	switch req.Provider {
 	case "s3":
 		if req.Bucket == "" {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required for S3")
 			return
 		}
-		if req.AccessKeyID == "" || req.SecretAccessKey == "" {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required for S3")
+		merged, status, errMsg := mergeS3Credentials(req.AccessKeyID, req.SecretAccessKey, existing, h.secrets, "s3")
+		if errMsg != "" {
+			httputil.WriteJSONError(w, status, errMsg)
 			return
 		}
 		s3Region = req.Region
 		if s3Region == "" {
 			s3Region = "us-east-1"
 		}
-		var err error
-		encS3AccessKeyID, err = h.secrets.Encrypt(req.AccessKeyID)
-		if err != nil {
-			slog.Error("failed to encrypt S3 access key ID", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		encS3SecretKey, err = h.secrets.Encrypt(req.SecretAccessKey)
-		if err != nil {
-			slog.Error("failed to encrypt S3 secret access key", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
+		encS3AccessKeyID = merged.encryptedAccessKeyID
+		encS3SecretKey = merged.encryptedSecretAccessKey
 		if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
 			Bucket: req.Bucket, Region: s3Region, Endpoint: req.Endpoint,
-			AccessKeyID: req.AccessKeyID, SecretAccessKey: req.SecretAccessKey,
+			AccessKeyID: merged.accessKeyID, SecretAccessKey: merged.secretAccessKey,
 		}); err != nil {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
 			return
@@ -666,19 +664,14 @@ func (h *OrgHandler) UpdateOrgCloudStorageConfig(w http.ResponseWriter, r *http.
 			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsBucket is required for GCS")
 			return
 		}
-		if req.GCSCredentialsJSON == "" {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsCredentialsJson is required for GCS")
+		mergedGCS, status, errMsg := mergeGCSCredentials(req.GCSCredentialsJSON, existing, h.secrets, "gcs")
+		if errMsg != "" {
+			httputil.WriteJSONError(w, status, errMsg)
 			return
 		}
-		var err error
-		encGCSCredJSON, err = h.secrets.Encrypt(req.GCSCredentialsJSON)
-		if err != nil {
-			slog.Error("failed to encrypt GCS credentials JSON", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
+		encGCSCredJSON = mergedGCS.encryptedCredentialsJSON
 		if err := storage.ValidateGCSConfig(r.Context(), &storage.GCSConfig{
-			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: req.GCSCredentialsJSON,
+			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: mergedGCS.credentialsJSON,
 		}); err != nil {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "GCS validation failed: "+err.Error())
 			return

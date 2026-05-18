@@ -512,6 +512,12 @@ func (h *AdminHandler) GetS3Config(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateS3Config handles PUT /api/v1/admin/me/s3-config
+//
+// Partial updates: when AccessKeyID or SecretAccessKey is omitted on a
+// follow-up edit (e.g. the user just wants to tweak region or endpoint and
+// leaves the password fields blank), the handler reuses the previously-saved
+// encrypted credentials instead of rejecting the request. Initial creation
+// still requires both keys.
 func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 	claims := GetUserInfo(r.Context())
 	if claims == nil {
@@ -529,10 +535,6 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required")
 		return
 	}
-	if req.AccessKeyID == "" || req.SecretAccessKey == "" {
-		httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required")
-		return
-	}
 
 	if h.secrets == nil {
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "encryption not configured")
@@ -544,31 +546,39 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 		region = "us-east-1"
 	}
 
-	encAccessKeyID, err := h.secrets.Encrypt(req.AccessKeyID)
+	// Look up the existing row so we can merge in saved credentials when the
+	// caller omits them. GetUserCloudStorageConfig returns a User with the
+	// encrypted columns populated (or nil pointers when nothing's saved).
+	existing, err := h.users.GetUserCloudStorageConfig(r.Context(), claims.UserID)
 	if err != nil {
-		slog.Error("failed to encrypt S3 access key ID", "error", err)
+		slog.Error("failed to load existing user storage config", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	encSecretAccessKey, err := h.secrets.Encrypt(req.SecretAccessKey)
-	if err != nil {
-		slog.Error("failed to encrypt S3 secret access key", "error", err)
-		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+	merged, status, errMsg := mergeS3Credentials(req.AccessKeyID, req.SecretAccessKey, userStorageView{u: existing}, h.secrets, "")
+	if errMsg != "" {
+		httputil.WriteJSONError(w, status, errMsg)
 		return
 	}
 
-	// Validate S3 connectivity before saving
+	// Validate S3 connectivity before saving. We use the merged plaintext
+	// (whether freshly-provided or pulled from the encrypted store) so the
+	// region/endpoint/bucket change is verified against credentials that
+	// actually exist.
 	if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
 		Bucket:         req.Bucket,
 		Region:         region,
 		Endpoint:       req.Endpoint,
-		AccessKeyID:    req.AccessKeyID,
-		SecretAccessKey: req.SecretAccessKey,
+		AccessKeyID:    merged.accessKeyID,
+		SecretAccessKey: merged.secretAccessKey,
 	}); err != nil {
 		httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
 		return
 	}
+
+	encAccessKeyID := merged.encryptedAccessKeyID
+	encSecretAccessKey := merged.encryptedSecretAccessKey
 
 	if err := h.users.UpdateUserS3Config(r.Context(), claims.UserID, req.Bucket, region, req.Endpoint, encAccessKeyID, encSecretAccessKey); err != nil {
 		slog.Error("failed to update user S3 config", "error", err)
@@ -679,36 +689,36 @@ func (h *AdminHandler) UpdateCloudStorageConfig(w http.ResponseWriter, r *http.R
 		gcsBucket, gcsProjectID, encGCSCredJSON                          string
 	)
 
+	// Load the existing row so partial credential updates (omit accessKeyId
+	// / secretAccessKey / gcsCredentialsJson to keep current) work.
+	existingUser, err := h.users.GetUserCloudStorageConfig(r.Context(), claims.UserID)
+	if err != nil {
+		slog.Error("failed to load existing user cloud storage config", "error", err)
+		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	existing := userStorageView{u: existingUser}
+
 	switch req.Provider {
 	case "s3":
 		if req.Bucket == "" {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "bucket is required for S3")
 			return
 		}
-		if req.AccessKeyID == "" || req.SecretAccessKey == "" {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "accessKeyId and secretAccessKey are required for S3")
+		merged, status, errMsg := mergeS3Credentials(req.AccessKeyID, req.SecretAccessKey, existing, h.secrets, "s3")
+		if errMsg != "" {
+			httputil.WriteJSONError(w, status, errMsg)
 			return
 		}
 		s3Region = req.Region
 		if s3Region == "" {
 			s3Region = "us-east-1"
 		}
-		var err error
-		encS3AccessKeyID, err = h.secrets.Encrypt(req.AccessKeyID)
-		if err != nil {
-			slog.Error("failed to encrypt S3 access key ID", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		encS3SecretKey, err = h.secrets.Encrypt(req.SecretAccessKey)
-		if err != nil {
-			slog.Error("failed to encrypt S3 secret access key", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
+		encS3AccessKeyID = merged.encryptedAccessKeyID
+		encS3SecretKey = merged.encryptedSecretAccessKey
 		if err := storage.ValidateS3Config(r.Context(), &models.UserS3Config{
 			Bucket: req.Bucket, Region: s3Region, Endpoint: req.Endpoint,
-			AccessKeyID: req.AccessKeyID, SecretAccessKey: req.SecretAccessKey,
+			AccessKeyID: merged.accessKeyID, SecretAccessKey: merged.secretAccessKey,
 		}); err != nil {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "S3 validation failed: "+err.Error())
 			return
@@ -721,19 +731,14 @@ func (h *AdminHandler) UpdateCloudStorageConfig(w http.ResponseWriter, r *http.R
 			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsBucket is required for GCS")
 			return
 		}
-		if req.GCSCredentialsJSON == "" {
-			httputil.WriteJSONError(w, http.StatusBadRequest, "gcsCredentialsJson is required for GCS")
+		mergedGCS, status, errMsg := mergeGCSCredentials(req.GCSCredentialsJSON, existing, h.secrets, "gcs")
+		if errMsg != "" {
+			httputil.WriteJSONError(w, status, errMsg)
 			return
 		}
-		var err error
-		encGCSCredJSON, err = h.secrets.Encrypt(req.GCSCredentialsJSON)
-		if err != nil {
-			slog.Error("failed to encrypt GCS credentials JSON", "error", err)
-			httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
+		encGCSCredJSON = mergedGCS.encryptedCredentialsJSON
 		if err := storage.ValidateGCSConfig(r.Context(), &storage.GCSConfig{
-			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: req.GCSCredentialsJSON,
+			Bucket: req.GCSBucket, ProjectID: req.GCSProjectID, CredentialsJSON: mergedGCS.credentialsJSON,
 		}); err != nil {
 			httputil.WriteJSONError(w, http.StatusBadRequest, "GCS validation failed: "+err.Error())
 			return
