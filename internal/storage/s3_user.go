@@ -82,6 +82,33 @@ func NewUserBodyStorage() *UserBodyStorage {
 	return &UserBodyStorage{}
 }
 
+// Invalidate drops the cached storage client for one owner so the next
+// Upload/Download rebuilds it from a fresh config. Safe to call when no
+// entry exists. Also closes the underlying GCS client (if any) to release
+// the HTTP connection pool.
+//
+// This is the missing link in the storage cache: getOrCreateClient
+// invalidates by configHash only when the *caller* passes a fresh cfg, and
+// upstream callers cache the cfg too. So a dashboard config change never
+// observes a different hash → never triggers a rebuild → keeps using the
+// stale client. The handler now calls Invalidate from the admin write
+// paths, closing that gap.
+func (u *UserBodyStorage) Invalidate(ownerID uuid.UUID) {
+	key := ownerID.String()
+	existing, ok := u.clients.LoadAndDelete(key)
+	if !ok {
+		return
+	}
+	client, ok := existing.(*userStorageClient)
+	if !ok {
+		return
+	}
+	if client.gcsClient != nil {
+		// Best-effort close — the GCS client owns an HTTP pool.
+		_ = client.gcsClient.Close()
+	}
+}
+
 // Download fetches and decompresses a body from the owner's bucket (S3 or GCS).
 func (u *UserBodyStorage) Download(ctx context.Context, ownerID uuid.UUID, cfg *models.UserCloudStorageConfig, key string) (*S3BodyContent, error) {
 	client, err := u.getOrCreateClient(ownerID, cfg)

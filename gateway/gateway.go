@@ -213,6 +213,11 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 		}
 
 		adminHandler := api.NewAdminHandler(store, store, store, store, store, adminSecretStore, jwtSvc, store, store, emailSender, frontendURL)
+		// Wire cache invalidation: when a dashboard write lands, the admin
+		// handler tells the proxy to drop its cached cloud-storage config so
+		// the very next LLM request rebuilds from the new persisted state.
+		// Without this, changes wait out cloudCacheTTL (5 minutes).
+		adminHandler.SetCloudStorageInvalidator(proxyHandler)
 		usageHandler = api.NewUsageHandler(store, store, store, store, adminSecretStore, s3Storage, userBodyStorage)
 		metadataHandler = api.NewMetadataHandler(store, store)
 		claudeAnalyticsHandler = api.NewClaudeAnalyticsHandler(store, store)
@@ -222,6 +227,7 @@ func Build(ctx context.Context, opts ...Option) (*Server, error) {
 		var orgHandler *api.OrgHandler
 		if adminSecretStore != nil {
 			orgHandler = api.NewOrgHandler(store, store, adminSecretStore, jwtSvc, store, emailSender, frontendURL)
+			orgHandler.SetCloudStorageInvalidator(proxyHandler)
 		}
 
 		waitlistHandler := api.NewWaitlistHandler(store, emailSender)

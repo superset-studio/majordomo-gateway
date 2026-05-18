@@ -88,6 +88,7 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 				r.Get("/me/cloud-storage-config", adminCfg.AdminHandler.GetCloudStorageConfig)
 				r.Put("/me/cloud-storage-config", adminCfg.AdminHandler.UpdateCloudStorageConfig)
 				r.Delete("/me/cloud-storage-config", adminCfg.AdminHandler.DeleteCloudStorageConfig)
+				r.Post("/me/cloud-storage-config/reload", adminCfg.AdminHandler.ReloadCloudStorageConfig)
 				r.Get("/me/provider-keys", adminCfg.AdminHandler.ListProviderKeys)
 				r.Put("/me/provider-keys/{provider}", adminCfg.AdminHandler.SetProviderKey)
 				r.Delete("/me/provider-keys/{provider}", adminCfg.AdminHandler.DeleteProviderKey)
@@ -180,6 +181,7 @@ func New(cfg *config.ServerConfig, proxyHandler *proxy.Handler, checker HealthCh
 					r.Get("/orgs/current/cloud-storage-config", adminCfg.OrgHandler.GetOrgCloudStorageConfig)
 					r.Put("/orgs/current/cloud-storage-config", adminCfg.OrgHandler.UpdateOrgCloudStorageConfig)
 					r.Delete("/orgs/current/cloud-storage-config", adminCfg.OrgHandler.ClearOrgCloudStorageConfig)
+					r.Post("/orgs/current/cloud-storage-config/reload", adminCfg.OrgHandler.ReloadOrgCloudStorageConfig)
 				}
 			})
 		})
