@@ -20,13 +20,22 @@ import (
 
 // OrgHandler provides REST API endpoints for organization management.
 type OrgHandler struct {
-	orgs        storage.OrganizationStorage
-	users       storage.UserStorage
-	secrets     secrets.SecretStore
-	jwt         *auth.JWTService
-	emailVerify storage.EmailVerificationStorage
-	email       EmailSender
-	frontendURL string
+	orgs             storage.OrganizationStorage
+	users            storage.UserStorage
+	secrets          secrets.SecretStore
+	jwt              *auth.JWTService
+	emailVerify      storage.EmailVerificationStorage
+	email            EmailSender
+	frontendURL      string
+	cloudInvalidator CloudStorageInvalidator
+}
+
+// SetCloudStorageInvalidator wires a CloudStorageInvalidator that the handler
+// uses to evict cached cloud-storage state after org-level writes/deletes.
+// Nil means "no invalidator". See AdminHandler.SetCloudStorageInvalidator for
+// the rationale.
+func (h *OrgHandler) SetCloudStorageInvalidator(inv CloudStorageInvalidator) {
+	h.cloudInvalidator = inv
 }
 
 // NewOrgHandler creates a new organization handler.
@@ -551,6 +560,9 @@ func (h *OrgHandler) UpdateOrgS3Config(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateOrgCloudStorage(*claims.OrgID)
+	}
 
 	httputil.WriteJSON(w, http.StatusOK, s3ConfigResponse{
 		Bucket:         req.Bucket,
@@ -571,6 +583,9 @@ func (h *OrgHandler) ClearOrgS3Config(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to clear org S3 config", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateOrgCloudStorage(*claims.OrgID)
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -692,6 +707,9 @@ func (h *OrgHandler) UpdateOrgCloudStorageConfig(w http.ResponseWriter, r *http.
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateOrgCloudStorage(*claims.OrgID)
+	}
 
 	resp := cloudStorageConfigResponse{Provider: req.Provider, CredentialsSet: true}
 	switch req.Provider {
@@ -718,8 +736,27 @@ func (h *OrgHandler) ClearOrgCloudStorageConfig(w http.ResponseWriter, r *http.R
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateOrgCloudStorage(*claims.OrgID)
+	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ReloadOrgCloudStorageConfig handles POST /api/v1/admin/orgs/current/cloud-storage-config/reload
+//
+// Org analog of AdminHandler.ReloadCloudStorageConfig. Drops the proxy's
+// cached org config + cached storage client without modifying the persisted
+// row. See that docstring for the use case.
+func (h *OrgHandler) ReloadOrgCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.requireOrgAdmin(w, r)
+	if !ok {
+		return
+	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateOrgCloudStorage(*claims.OrgID)
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 }
 
 // --- Helpers ---

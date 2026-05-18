@@ -651,6 +651,42 @@ func (h *Handler) getOrgCloudStorageConfig(ctx context.Context, orgID uuid.UUID)
 	return cfg
 }
 
+// InvalidateUserCloudStorage drops the cached cloud-storage config and the
+// cached storage client for one user. Call after the user's
+// /me/cloud-storage-config is written, deleted, or hot-reloaded so the very
+// next request observes the new config — without waiting for cloudCacheTTL
+// to expire (5 minutes by default).
+//
+// Background: the proxy caches the decrypted config (sync.Map, TTL-based) AND
+// UserBodyStorage caches the constructed S3/GCS client (sync.Map, hash-based).
+// Both have to be cleared together. The second cache is hash-aware but only
+// reacts when the *caller* passes a fresh cfg, and the proxy was the caller —
+// so before this fix the storage cache never saw a hash change.
+//
+// Safe to call on a nil receiver — useful for tests / partial wiring.
+func (h *Handler) InvalidateUserCloudStorage(userID uuid.UUID) {
+	if h == nil {
+		return
+	}
+	h.userCloudCache.Delete(userID.String())
+	if h.userBodyStorage != nil {
+		h.userBodyStorage.Invalidate(userID)
+	}
+}
+
+// InvalidateOrgCloudStorage is the org analog of InvalidateUserCloudStorage.
+// Drops the cached decrypted cloud-storage config AND the cached S3/GCS
+// client so the next request rebuilds both from the persisted row.
+func (h *Handler) InvalidateOrgCloudStorage(orgID uuid.UUID) {
+	if h == nil {
+		return
+	}
+	h.orgCloudCache.Delete(orgID.String())
+	if h.userBodyStorage != nil {
+		h.userBodyStorage.Invalidate(orgID)
+	}
+}
+
 // resolveOrgCloudConfig decrypts and builds a UserCloudStorageConfig from an Organization model.
 func (h *Handler) resolveOrgCloudConfig(org *models.Organization, orgID uuid.UUID) *models.UserCloudStorageConfig {
 	provider := ""

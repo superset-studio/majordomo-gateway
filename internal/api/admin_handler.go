@@ -21,18 +21,29 @@ import (
 
 // AdminHandler provides REST API endpoints for the admin web UI.
 type AdminHandler struct {
-    apiKeys      storage.APIKeyStorage
-    proxyKeys    storage.ProxyKeyStorage
-    users        storage.UserStorage
-    orgs         storage.OrganizationStorage
-    providerKeys storage.ProviderKeyStorage
-    secrets      secrets.SecretStore
-    jwt          *auth.JWTService
-    proxyKeySvc  *ProxyKeyService
-    pwdResets    storage.PasswordResetStorage
-    emailVerify  storage.EmailVerificationStorage
-    email        EmailSender
-    frontendURL  string
+    apiKeys          storage.APIKeyStorage
+    proxyKeys        storage.ProxyKeyStorage
+    users            storage.UserStorage
+    orgs             storage.OrganizationStorage
+    providerKeys     storage.ProviderKeyStorage
+    secrets          secrets.SecretStore
+    jwt              *auth.JWTService
+    proxyKeySvc      *ProxyKeyService
+    pwdResets        storage.PasswordResetStorage
+    emailVerify      storage.EmailVerificationStorage
+    email            EmailSender
+    frontendURL      string
+    cloudInvalidator CloudStorageInvalidator
+}
+
+// SetCloudStorageInvalidator wires a CloudStorageInvalidator that the handler
+// uses to evict cached cloud-storage state after writes/deletes. Nil means
+// "no invalidator" (the handler then relies on the proxy's TTL to refresh).
+//
+// Using a setter rather than a constructor argument keeps NewAdminHandler's
+// signature stable for callers built before this fix.
+func (h *AdminHandler) SetCloudStorageInvalidator(inv CloudStorageInvalidator) {
+    h.cloudInvalidator = inv
 }
 
 // NewAdminHandler creates a new admin API handler.
@@ -575,6 +586,11 @@ func (h *AdminHandler) UpdateS3Config(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Invalidate the proxy/storage caches so the next LLM request picks up
+	// the new config instead of waiting out the TTL.
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateUserCloudStorage(claims.UserID)
+	}
 
 	resp := s3ConfigResponse{
 		Bucket:         req.Bucket,
@@ -598,6 +614,9 @@ func (h *AdminHandler) DeleteS3Config(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to clear user S3 config", "error", err)
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateUserCloudStorage(claims.UserID)
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -747,6 +766,9 @@ func (h *AdminHandler) UpdateCloudStorageConfig(w http.ResponseWriter, r *http.R
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateUserCloudStorage(claims.UserID)
+	}
 
 	resp := cloudStorageConfigResponse{Provider: req.Provider, CredentialsSet: true}
 	switch req.Provider {
@@ -774,8 +796,31 @@ func (h *AdminHandler) DeleteCloudStorageConfig(w http.ResponseWriter, r *http.R
 		httputil.WriteJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateUserCloudStorage(claims.UserID)
+	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ReloadCloudStorageConfig handles POST /api/v1/admin/me/cloud-storage-config/reload
+//
+// Drops the proxy's cached config + storage client for this user without
+// changing the persisted row, forcing the next LLM request to rebuild from
+// fresh Postgres state. Useful when an external change rotated keys or when
+// the operator wants to confirm a recent dashboard edit took effect.
+//
+// Idempotent and cheap — safe to wire to a "Reload config" button.
+func (h *AdminHandler) ReloadCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if h.cloudInvalidator != nil {
+		h.cloudInvalidator.InvalidateUserCloudStorage(claims.UserID)
+	}
+	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 }
 
 // buildCloudStorageResponse creates a cloudStorageConfigResponse from model fields.
