@@ -1,6 +1,7 @@
 package api
 
 import (
+    "context"
     "encoding/json"
     "log/slog"
     "net/http"
@@ -776,6 +777,35 @@ func (h *AdminHandler) DeleteCloudStorageConfig(w http.ResponseWriter, r *http.R
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// TestCloudStorageConfig handles POST /api/v1/admin/me/cloud-storage-config/test
+//
+// When the body is empty, it tests the user's currently-saved config. When
+// the body contains a full updateCloudStorageConfigRequest, it tests *that*
+// config without persisting — letting the dashboard validate writes before
+// the user hits Save. This is the missing companion to the HeadBucket-only
+// "S3 Configured" badge (see superset-studio/majordomo-gateway#6).
+func (h *AdminHandler) TestCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetUserInfo(r.Context())
+	if claims == nil {
+		httputil.WriteJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	cfg, status, errMsg := resolveStorageTestConfig(r, func(ctx context.Context) (*models.UserCloudStorageConfig, error) {
+		user, err := h.users.GetUserCloudStorageConfig(ctx, claims.UserID)
+		if err != nil {
+			return nil, err
+		}
+		return decryptUserStorageConfig(user, h.secrets)
+	})
+	if errMsg != "" {
+		httputil.WriteJSONError(w, status, errMsg)
+		return
+	}
+
+	runStorageTest(r.Context(), w, cfg)
 }
 
 // buildCloudStorageResponse creates a cloudStorageConfigResponse from model fields.

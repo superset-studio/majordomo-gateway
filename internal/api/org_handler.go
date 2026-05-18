@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -720,6 +721,31 @@ func (h *OrgHandler) ClearOrgCloudStorageConfig(w http.ResponseWriter, r *http.R
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// TestOrgCloudStorageConfig handles POST /api/v1/admin/orgs/current/cloud-storage-config/test
+//
+// Org-level companion to AdminHandler.TestCloudStorageConfig. See that
+// docstring for body semantics. Restricted to org admins via requireOrgAdmin.
+func (h *OrgHandler) TestOrgCloudStorageConfig(w http.ResponseWriter, r *http.Request) {
+	claims, ok := h.requireOrgAdmin(w, r)
+	if !ok {
+		return
+	}
+
+	cfg, status, errMsg := resolveStorageTestConfig(r, func(ctx context.Context) (*models.UserCloudStorageConfig, error) {
+		org, err := h.orgs.GetOrgCloudStorageConfig(ctx, *claims.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		return decryptOrgStorageConfig(org, h.secrets)
+	})
+	if errMsg != "" {
+		httputil.WriteJSONError(w, status, errMsg)
+		return
+	}
+
+	runStorageTest(r.Context(), w, cfg)
 }
 
 // --- Helpers ---
